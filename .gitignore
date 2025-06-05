@@ -202,3 +202,6 @@ raw-data/
 
 # Ignore git worktrees
 archive/
+
+# Ignore repomix generated files
+repomix-output.txt
