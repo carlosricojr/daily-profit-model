@@ -4,6 +4,21 @@
 
 This directory contains the production-ready machine learning system for the Daily Profit Model. The current implementation represents the best features consolidated from a multi-agent optimization process, providing enterprise-grade ML capabilities with advanced monitoring, shadow deployment, and confidence intervals.
 
+## Directory Structure
+
+```
+src/modeling/
+├── train_model.py              # Enhanced training system (v1 optimized)
+├── predict_daily.py            # Advanced prediction engine (v2 optimized)
+├── model_manager.py            # Model lifecycle management
+├── confidence_intervals.py     # Uncertainty quantification
+├── model_monitoring.py         # Performance tracking and drift detection
+├── __init__.py                 # Package initialization
+└── README.md                   # This documentation
+```
+
+**Note**: Previous optimization versions are now organized in the main project archive at `/archive/modeling_optimization_versions/`
+
 ## Current Production Files
 
 ### Core ML Components
@@ -28,26 +43,49 @@ This directory contains the production-ready machine learning system for the Dai
   - Performance tracking and comparison
   - Model artifact management
 
+### Supporting Components
+
+- **`confidence_intervals.py`** - **Uncertainty quantification**
+  - Quantile regression implementation
+  - Confidence interval calculation utilities
+  - Uncertainty assessment tools
+
+- **`model_monitoring.py`** - **Model performance tracking**
+  - Real-time monitoring capabilities
+  - Performance degradation detection
+  - Drift detection algorithms
+
 ### System Architecture Files
 
 - **`__init__.py`** - Package initialization with core imports
 
 ## Archived Versions
 
-Previous optimization iterations are preserved in `archive/` with descriptive names:
+Previous optimization iterations are preserved in `/archive/modeling_optimization_versions/`:
 
 ### Training Model Versions
+- **`train_model_baseline.py`** - Original baseline training implementation
 - **`train_model_enhanced.py`** - Enhanced v1 features (source of current production)
 - **`train_model_advanced.py`** - v2 advanced training with expanded monitoring
-- **`train_model_enterprise.py`** - v3 enterprise features for future scaling
+- **`train_model_mlops.py`** - MLOps-focused version with automation features
 
 ### Prediction System Versions
+- **`predict_daily_baseline.py`** - Original baseline prediction system
 - **`predict_daily_enhanced.py`** - v1 enhanced predictions with basic monitoring
 - **`predict_daily_advanced.py`** - v2 advanced system (source of current production)
-- **`predict_daily_enterprise.py`** - v3 enterprise system with distributed processing
 
-### Additional Archived Components
-- **`model_manager_basic.py`** - Basic model management from original system
+### Archive Organization
+The modeling optimization versions are now consolidated with other project archives:
+- **Main archive location**: `/archive/modeling_optimization_versions/`
+- **Additional versions**: Available in `/archive/external-worktrees/modeling-v1/`, `modeling-v2/`, `modeling-v3/`
+- **Legacy backup**: Available in `/archive/modeling_backup/`
+
+### Archive Purpose
+These archived versions provide:
+- **Historical reference** for development decisions
+- **Rollback capabilities** if needed
+- **Alternative implementations** for specific use cases
+- **Future enhancement ideas** from advanced versions
 
 ## Production System Features
 
@@ -70,6 +108,10 @@ Previous optimization iterations are preserved in `archive/` with descriptive na
 - **Registry System**: Centralized model artifact storage
 - **Performance Tracking**: Historical performance comparison
 - **Automated Workflows**: Model promotion and retirement automation
+
+### Supporting Systems
+- **Confidence Intervals (confidence_intervals.py)**: Advanced uncertainty quantification with quantile regression
+- **Model Monitoring (model_monitoring.py)**: Real-time performance tracking and drift detection
 
 ## Key Performance Benefits
 
@@ -130,6 +172,19 @@ deployment_id = predictor.create_shadow_deployment(
 
 # Evaluate shadow performance
 results = predictor.evaluate_shadow_deployments()
+```
+
+### Using Supporting Components
+```python
+# Confidence intervals
+from modeling.confidence_intervals import PredictionIntervals
+intervals = PredictionIntervals()
+lower, upper = intervals.predict_intervals(X_test)
+
+# Model monitoring
+from modeling.model_monitoring import ModelMonitor
+monitor = ModelMonitor(db_manager)
+degradation_check = monitor.check_model_degradation(model_version, metrics)
 ```
 
 ## Command Line Usage
