@@ -436,7 +436,7 @@ All previous optimization versions are preserved in `/archive/` for:
 
 ## License
 
-[Specify your license here]
+This is proprietary and confidential technology. All rights reserved. Unauthorized use, reproduction, or distribution is strictly prohibited.
 
 ## Contact
 
