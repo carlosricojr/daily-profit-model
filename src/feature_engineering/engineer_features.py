@@ -629,5 +629,11 @@ def main():
         raise
 
 
+def engineer_features(**kwargs):
+    """Convenience function for backward compatibility."""
+    engineer = FeatureEngineer()
+    return engineer.engineer_features(**kwargs)
+
+
 if __name__ == '__main__':
     main()

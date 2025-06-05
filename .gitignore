@@ -199,3 +199,6 @@ ai-docs/
 
 # Ignore raw data
 raw-data/
+
+# Ignore git worktrees
+archive/

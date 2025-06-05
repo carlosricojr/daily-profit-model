@@ -15,6 +15,11 @@ import json
 logger = logging.getLogger(__name__)
 
 
+class APIClient:
+    """Alias for backward compatibility."""
+    pass
+
+
 class RiskAnalyticsAPIClient:
     """Client for interacting with the Risk Analytics TFT External API."""
     

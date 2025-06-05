@@ -363,6 +363,15 @@ class TradesIngester:
         self.api_client.close()
 
 
+def ingest_trades_closed(**kwargs):
+    """Convenience function for backward compatibility."""
+    ingester = TradesIngester()
+    try:
+        return ingester.ingest_trades(trade_type='closed', **kwargs)
+    finally:
+        ingester.close()
+
+
 def main():
     """Main function for command-line execution."""
     parser = argparse.ArgumentParser(description='Ingest trades data from Risk Analytics API')
