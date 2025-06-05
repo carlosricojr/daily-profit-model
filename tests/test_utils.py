@@ -334,7 +334,7 @@ class TestAPIClientEnhancements(unittest.TestCase):
     """Test enhanced API client functionality."""
     
     def setUp(self):
-        os.environ["API_KEY"] = "test_key"
+        os.environ["RISK_API_KEY"] = "test_key"
     
     @patch('requests.Session')
     def test_circuit_breaker(self, mock_session_class):

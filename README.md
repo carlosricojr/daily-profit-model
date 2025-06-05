@@ -44,7 +44,7 @@ daily-profit-model/
 │   │   └── archive/               # Previous optimization versions
 │   ├── pipeline_orchestration/    # Enhanced orchestration (v2 optimized)
 │   │   ├── run_pipeline.py        # Main orchestration with SLA monitoring
-│   │   ├── health_checks_v2.py    # Comprehensive health monitoring
+│   │   ├── health_checks.py       # Comprehensive health monitoring
 │   │   ├── sla_monitor.py         # SLA tracking and alerting
 │   │   └── airflow_dag.py         # Apache Airflow DAG for automation
 │   └── utils/                     # Enhanced utilities (v2 optimized)
@@ -100,8 +100,8 @@ daily-profit-model/
    Create a `.env` file in the project root with:
    ```env
    # API Configuration
-   API_KEY=your_api_key_here
-   API_BASE_URL=https://easton.apis.arizet.io/risk-analytics/tft/external/
+   RISK_API_KEY=your_api_key_here
+   RISK_API_BASE_URL=https://easton.apis.arizet.io/risk-analytics/tft/external/
    
    # Database Configuration
    DB_HOST=db.yvwwaxmwbkkyepreillh.supabase.co
@@ -384,7 +384,7 @@ WHERE status = 'active';
 Check system health:
 ```bash
 # Comprehensive health checks
-uv run --env-file .env -- python -m src.pipeline_orchestration.health_checks_v2
+uv run --env-file .env -- python -m src.pipeline_orchestration.health_checks
 
 # SLA monitoring
 uv run --env-file .env -- python -m src.pipeline_orchestration.sla_monitor --check-recent

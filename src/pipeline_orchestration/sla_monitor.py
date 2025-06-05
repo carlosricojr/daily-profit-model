@@ -409,7 +409,7 @@ class SLAMonitor:
         import time
         
         try:
-            api_base_url = os.getenv('API_BASE_URL', 'https://d3m1s17i9h2y69.cloudfront.net')
+            api_base_url = os.getenv('RISK_API_BASE_URL', 'https://d3m1s17i9h2y69.cloudfront.net')
             start_time = time.time()
             response = requests.get(f"{api_base_url}/accounts", timeout=30)
             response_time = (time.time() - start_time) * 1000

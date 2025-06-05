@@ -263,13 +263,13 @@ DATABASE_CONFIG_FIELDS = [
 # API configuration fields
 API_CONFIG_FIELDS = [
     ConfigField(
-        name="API_KEY",
+        name="RISK_API_KEY",
         required=True,
         type=str,
         description="API key for authentication"
     ),
     ConfigField(
-        name="API_BASE_URL",
+        name="RISK_API_BASE_URL",
         required=False,
         default="https://easton.apis.arizet.io/risk-analytics/tft/external/",
         type=str,

@@ -306,7 +306,7 @@ end_pipeline = DummyOperator(
 # Pre-flight checks
 health_check = PythonOperator(
     task_id='health_check',
-    python_callable=lambda **context: __import__('pipeline_orchestration.health_checks', fromlist=['run_health_check']).run_health_check(verbose=True),
+    python_callable=lambda **context: __import__('pipeline_orchestration.health_checks', fromlist=['run_health_check']).run_health_check(verbose=True, include_trends=False),
     dag=dag,
     retries=1,
 )

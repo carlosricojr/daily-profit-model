@@ -57,7 +57,7 @@ class TestCircuitBreaker:
 class TestRiskAnalyticsAPIClient:
     """Test enhanced API client functionality."""
     
-    @patch.dict(os.environ, {'API_KEY': 'test_key'})
+    @patch.dict(os.environ, {'RISK_API_KEY': 'test_key'})
     def test_client_initialization(self):
         """Test API client initialization."""
         client = RiskAnalyticsAPIClient()
@@ -66,7 +66,7 @@ class TestRiskAnalyticsAPIClient:
         assert client.total_requests == 0
         assert client.failed_requests == 0
     
-    @patch.dict(os.environ, {'API_KEY': 'test_key'})
+    @patch.dict(os.environ, {'RISK_API_KEY': 'test_key'})
     @patch('requests.Session.request')
     def test_successful_request(self, mock_request):
         """Test successful API request."""
@@ -84,7 +84,7 @@ class TestRiskAnalyticsAPIClient:
         assert client.failed_requests == 0
         assert client.circuit_breaker.state == 'closed'
     
-    @patch.dict(os.environ, {'API_KEY': 'test_key'})
+    @patch.dict(os.environ, {'RISK_API_KEY': 'test_key'})
     @patch('requests.Session.request')
     def test_retry_on_timeout(self, mock_request):
         """Test retry logic on timeout."""
@@ -106,7 +106,7 @@ class TestRiskAnalyticsAPIClient:
         assert mock_request.call_count == 3
         assert client.failed_requests == 2
     
-    @patch.dict(os.environ, {'API_KEY': 'test_key'})
+    @patch.dict(os.environ, {'RISK_API_KEY': 'test_key'})
     @patch('requests.Session.request')
     def test_circuit_breaker_blocks_requests(self, mock_request):
         """Test circuit breaker blocks requests when open."""
@@ -123,7 +123,7 @@ class TestRiskAnalyticsAPIClient:
         assert 'Circuit breaker is open' in str(exc_info.value)
         mock_request.assert_not_called()
     
-    @patch.dict(os.environ, {'API_KEY': 'test_key'})
+    @patch.dict(os.environ, {'RISK_API_KEY': 'test_key'})
     @patch('requests.Session.request')
     def test_rate_limiting(self, mock_request):
         """Test rate limiting between requests."""
@@ -143,7 +143,7 @@ class TestRiskAnalyticsAPIClient:
         # Should take at least 100ms for two requests
         assert elapsed >= 0.1
     
-    @patch.dict(os.environ, {'API_KEY': 'test_key'})
+    @patch.dict(os.environ, {'RISK_API_KEY': 'test_key'})
     def test_get_stats(self):
         """Test statistics tracking."""
         client = RiskAnalyticsAPIClient()
@@ -161,7 +161,7 @@ class TestRiskAnalyticsAPIClient:
 class TestPaginationWithErrorHandling:
     """Test pagination with error handling."""
     
-    @patch.dict(os.environ, {'API_KEY': 'test_key'})
+    @patch.dict(os.environ, {'RISK_API_KEY': 'test_key'})
     @patch('requests.Session.request')
     def test_pagination_stops_on_client_error(self, mock_request):
         """Test pagination stops on client error."""
@@ -178,7 +178,7 @@ class TestPaginationWithErrorHandling:
         assert len(pages) == 0  # No pages returned due to error
         assert mock_request.call_count == 1  # Only one attempt
     
-    @patch.dict(os.environ, {'API_KEY': 'test_key'})
+    @patch.dict(os.environ, {'RISK_API_KEY': 'test_key'})
     @patch('requests.Session.request')
     def test_pagination_retries_on_server_error(self, mock_request):
         """Test pagination retries on server error."""

@@ -172,7 +172,7 @@ python -m src.modeling.predict_daily --evaluate-shadows
 python -m src.pipeline_orchestration.run_pipeline --log-level INFO
 
 # Run with comprehensive health checks
-python -m src.pipeline_orchestration.health_checks_v2 --full-check
+python -m src.pipeline_orchestration.health_checks --full-check
 
 # Monitor SLA compliance
 python -m src.pipeline_orchestration.sla_monitor --check-recent
@@ -189,8 +189,8 @@ DATABASE_USER=your_user
 DATABASE_PASSWORD=your_password
 
 # API
-API_KEY=your_api_key
-API_BASE_URL=https://api.example.com
+RISK_API_KEY=your_api_key
+RISK_API_BASE_URL=https://api.example.com
 
 # Monitoring
 PROMETHEUS_ENABLED=true

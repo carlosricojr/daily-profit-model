@@ -28,15 +28,15 @@ class RiskAnalyticsAPIClient:
         Initialize API client.
         
         Args:
-            api_key: API key for authentication (defaults to env var API_KEY)
-            base_url: Base URL for the API (defaults to env var API_BASE_URL)
+            api_key: API key for authentication (defaults to env var RISK_API_KEY)
+            base_url: Base URL for the API (defaults to env var RISK_API_BASE_URL)
         """
-        self.api_key = api_key or os.getenv('API_KEY')
+        self.api_key = api_key or os.getenv('RISK_API_KEY')
         if not self.api_key:
-            raise ValueError("API key is required. Set API_KEY environment variable.")
+            raise ValueError("API key is required. Set RISK_API_KEY environment variable.")
         
         self.base_url = base_url or os.getenv(
-            'API_BASE_URL', 
+            'RISK_API_BASE_URL', 
             'https://easton.apis.arizet.io/risk-analytics/tft/external/'
         )
         self.session = requests.Session()
