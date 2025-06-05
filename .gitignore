@@ -196,3 +196,6 @@ cython_debug/
 # AI Docs
 # folder which contains documentation and implemenation plans to assist AI coding assistants with implementation
 ai-docs/
+
+# Ignore raw data
+raw-data/
