@@ -192,3 +192,7 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# AI Docs
+# folder which contains documentation and implemenation plans to assist AI coding assistants with implementation
+ai-docs/
