@@ -192,14 +192,32 @@ class TestPaginationWithErrorHandling:
     @patch('requests.Session.request')
     def test_pagination_handles_successful_requests(self, mock_request):
         """Test pagination works with successful requests."""
-        # Simulate successful pagination with two pages
+        # Simulate successful pagination with two pages using proper API format
         mock_page1_response = MagicMock()
         mock_page1_response.status_code = 200
-        mock_page1_response.json.return_value = [{'id': 1}, {'id': 2}]
+        mock_page1_response.json.return_value = {
+            'Status': 'ok',
+            'Data': {
+                'data': [{'id': 1}, {'id': 2}],
+                'total': 3,
+                'skip': 0,
+                'limit': 2,
+                'count': 2
+            }
+        }
         
         mock_page2_response = MagicMock()
         mock_page2_response.status_code = 200
-        mock_page2_response.json.return_value = [{'id': 3}]  # Last page has fewer results
+        mock_page2_response.json.return_value = {
+            'Status': 'ok',
+            'Data': {
+                'data': [{'id': 3}],
+                'total': 3,
+                'skip': 2,
+                'limit': 2,
+                'count': 1
+            }
+        }
         
         mock_request.side_effect = [mock_page1_response, mock_page2_response]
         

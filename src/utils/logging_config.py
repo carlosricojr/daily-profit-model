@@ -9,7 +9,7 @@ import os
 import sys
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, Union
 from contextvars import ContextVar
@@ -36,7 +36,7 @@ class StructuredFormatter(logging.Formatter):
         """Format log record as JSON with context information."""
         # Base log data
         log_data = {
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
             'level': record.levelname,
             'logger': record.name,
             'message': record.getMessage(),

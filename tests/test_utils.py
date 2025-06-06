@@ -438,19 +438,43 @@ class TestAPIClientEnhancements(unittest.TestCase):
         # Create response objects for each page
         response1 = Mock()
         response1.status_code = 200
-        response1.json.return_value = [{"id": 1}, {"id": 2}]
+        response1.json.return_value = {
+            'Status': 'ok',
+            'Data': {
+                'data': [{"id": 1}, {"id": 2}],
+                'total': 4,
+                'skip': 0,
+                'limit': 2
+            }
+        }
         response1.headers = {}
         response1.text = ""
         
         response2 = Mock()
         response2.status_code = 200
-        response2.json.return_value = [{"id": 3}, {"id": 4}]
+        response2.json.return_value = {
+            'Status': 'ok',
+            'Data': {
+                'data': [{"id": 3}, {"id": 4}],
+                'total': 4,
+                'skip': 2,
+                'limit': 2
+            }
+        }
         response2.headers = {}
         response2.text = ""
         
         response3 = Mock()
         response3.status_code = 200
-        response3.json.return_value = []  # Empty response ends pagination
+        response3.json.return_value = {
+            'Status': 'ok',
+            'Data': {
+                'data': [],
+                'total': 4,
+                'skip': 4,
+                'limit': 2
+            }
+        }  # Empty response ends pagination
         response3.headers = {}
         response3.text = ""
         

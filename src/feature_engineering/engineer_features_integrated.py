@@ -11,14 +11,10 @@ from typing import Dict, List, Any, Optional, Tuple
 import argparse
 import pandas as pd
 import numpy as np
-import json
-from collections import defaultdict
-import time
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.database import get_db_manager
 from utils.logging_config import setup_logging
 from utils.query_performance import QueryPerformanceMonitor
 
@@ -420,7 +416,7 @@ class IntegratedProductionFeatureEngineer(OptimizedFeatureEngineer):
         
         # Query optimization
         qo = result['query_optimization']
-        logger.info(f"\nQuery Optimization:")
+        logger.info("\nQuery Optimization:")
         logger.info(f"  - Bulk queries executed: {qo['bulk_queries']}")
         logger.info(f"  - Equivalent individual queries: {qo['equivalent_individual_queries']}")
         logger.info(f"  - Reduction factor: {qo['query_reduction_factor']:.1f}x")
@@ -438,7 +434,7 @@ class IntegratedProductionFeatureEngineer(OptimizedFeatureEngineer):
         # Quality monitoring
         if 'quality_monitoring' in result and result['quality_monitoring'].get('summary'):
             qm = result['quality_monitoring']['summary']
-            logger.info(f"\nQuality Monitoring:")
+            logger.info("\nQuality Monitoring:")
             logger.info(f"  - Quality score: {qm['quality_score']:.2f}")
             logger.info(f"  - Total issues: {qm['total_issues']}")
             if qm['issue_breakdown']:

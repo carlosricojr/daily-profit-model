@@ -7,12 +7,11 @@ import os
 import sys
 import logging
 from datetime import datetime, timedelta, date
-from typing import Dict, List, Any, Optional, Tuple, Set
+from typing import Dict, List, Any, Optional, Tuple
 import argparse
 import pandas as pd
 import numpy as np
 import json
-from collections import defaultdict
 import time
 
 # Add parent directory to path for imports

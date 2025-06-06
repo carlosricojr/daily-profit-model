@@ -313,16 +313,16 @@ class OptimizationValidator:
         
         # Performance comparison
         logger.info("\nPERFORMANCE COMPARISON:")
-        logger.info(f"Original implementation:")
+        logger.info("Original implementation:")
         logger.info(f"  - Execution time: {results['original']['execution_time']:.2f} seconds")
         logger.info(f"  - Estimated queries: {results['original']['queries_executed']}")
         
-        logger.info(f"\nOptimized implementation:")
+        logger.info("\nOptimized implementation:")
         logger.info(f"  - Execution time: {results['optimized']['execution_time']:.2f} seconds")
         logger.info(f"  - Bulk queries: {results['optimized']['query_stats']['bulk_queries']}")
         logger.info(f"  - Query reduction: {results['performance_improvement']['query_reduction_pct']:.1f}%")
         
-        logger.info(f"\nIMPROVEMENT:")
+        logger.info("\nIMPROVEMENT:")
         logger.info(f"  - Speedup: {results['performance_improvement']['speedup_factor']}x faster")
         logger.info(f"  - Time saved: {results['performance_improvement']['time_saved_seconds']:.2f} seconds")
         
