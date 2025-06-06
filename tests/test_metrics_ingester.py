@@ -10,7 +10,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from src.data_ingestion.ingest_metrics_enhanced import (
+from src.data_ingestion.ingest_metrics import (
     MetricsIngester, MetricType
 )
 from src.data_ingestion.base_ingester import CheckpointManager
@@ -82,7 +82,7 @@ class TestMetricsIngester(unittest.TestCase):
         # Patch the dependencies
         self.patches = [
             patch('src.data_ingestion.base_ingester.get_db_manager'),
-            patch('src.data_ingestion.ingest_metrics_enhanced.RiskAnalyticsAPIClient')
+            patch('src.data_ingestion.ingest_metrics.RiskAnalyticsAPIClient')
         ]
         
         self.mock_get_db = self.patches[0].start()

@@ -12,7 +12,7 @@ import hashlib
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from .base_ingester import BaseIngester, IngestionMetrics
+from .base_ingester import BaseIngester
 from ..utils.api_client import RiskAnalyticsAPIClient
 from ..utils.logging_config import get_logger
 

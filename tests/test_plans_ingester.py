@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 import pandas as pd
 
-from src.data_ingestion.ingest_plans_enhanced import PlansIngester
+from src.data_ingestion.ingest_plans import PlansIngester
 
 
 class TestPlansIngester(unittest.TestCase):

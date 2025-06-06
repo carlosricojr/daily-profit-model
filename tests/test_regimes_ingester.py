@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 import numpy as np
 
-from src.data_ingestion.ingest_regimes_enhanced import RegimesIngester
+from src.data_ingestion.ingest_regimes import RegimesIngester
 
 
 class TestRegimesIngester(unittest.TestCase):

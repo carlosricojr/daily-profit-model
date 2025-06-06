@@ -10,7 +10,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from src.data_ingestion.ingest_accounts_enhanced import AccountsIngester
+from src.data_ingestion.ingest_accounts import AccountsIngester
 
 
 class TestAccountsIngester(unittest.TestCase):
@@ -28,7 +28,7 @@ class TestAccountsIngester(unittest.TestCase):
         # Patch the dependencies
         self.patches = [
             patch('src.data_ingestion.base_ingester.get_db_manager'),
-            patch('src.data_ingestion.ingest_accounts_enhanced.RiskAnalyticsAPIClient')
+            patch('src.data_ingestion.ingest_accounts.RiskAnalyticsAPIClient')
         ]
         
         self.mock_get_db = self.patches[0].start()
@@ -132,7 +132,17 @@ class TestAccountsIngester(unittest.TestCase):
             'ingestion_type': 'accounts',
             'last_processed_page': 2,
             'total_records': 150,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'metrics': {
+                'total_records': 150,
+                'new_records': 140,
+                'duplicate_records': 5,
+                'invalid_records': 5,
+                'api_calls': 3,
+                'api_errors': 0,
+                'db_errors': 0,
+                'validation_errors': {}
+            }
         }
         
         checkpoint_file = Path(self.temp_dir) / "accounts_checkpoint.json"
