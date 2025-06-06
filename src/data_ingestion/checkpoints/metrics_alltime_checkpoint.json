@@ -1,0 +1,20 @@
+{
+  "metric_type": "alltime",
+  "last_processed_page": 19,
+  "total_records": 20000,
+  "metrics": {
+    "total_records": 20000,
+    "new_records": 20000,
+    "duplicate_records": 0,
+    "invalid_records": 0,
+    "api_calls": 20,
+    "api_errors": 0,
+    "db_errors": 0,
+    "validation_errors": {},
+    "start_time": 1749214587.820896,
+    "processing_time": 63.52723407745361,
+    "records_per_second": 314.8255911760948
+  },
+  "timestamp": "2025-06-06T08:57:31.348136",
+  "ingestion_type": "metrics_alltime"
+}

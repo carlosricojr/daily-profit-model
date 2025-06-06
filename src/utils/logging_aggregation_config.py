@@ -10,7 +10,7 @@ from typing import Dict, Any
 def get_elasticsearch_config() -> Dict[str, Any]:
     """
     Configuration for Elasticsearch/ELK Stack integration.
-    
+
     Returns:
         Dictionary with Elasticsearch configuration
     """
@@ -22,19 +22,19 @@ def get_elasticsearch_config() -> Dict[str, Any]:
         "flush_interval": 5,  # seconds
         "auth": {
             "username": os.getenv("ELASTICSEARCH_USER"),
-            "password": os.getenv("ELASTICSEARCH_PASSWORD")
+            "password": os.getenv("ELASTICSEARCH_PASSWORD"),
         },
         "ssl": {
             "enabled": os.getenv("ELASTICSEARCH_SSL", "false").lower() == "true",
-            "verify": os.getenv("ELASTICSEARCH_SSL_VERIFY", "true").lower() == "true"
-        }
+            "verify": os.getenv("ELASTICSEARCH_SSL_VERIFY", "true").lower() == "true",
+        },
     }
 
 
 def get_cloudwatch_config() -> Dict[str, Any]:
     """
     Configuration for AWS CloudWatch Logs integration.
-    
+
     Returns:
         Dictionary with CloudWatch configuration
     """
@@ -43,16 +43,16 @@ def get_cloudwatch_config() -> Dict[str, Any]:
         "log_group": os.getenv("CLOUDWATCH_LOG_GROUP", "/aws/ecs/daily-profit-model"),
         "log_stream_prefix": os.getenv("CLOUDWATCH_STREAM_PREFIX", "app"),
         "batch_size": 10000,  # bytes
-        "batch_time": 5000,   # milliseconds
+        "batch_time": 5000,  # milliseconds
         "create_log_group": True,
-        "retention_days": 30
+        "retention_days": 30,
     }
 
 
 def get_datadog_config() -> Dict[str, Any]:
     """
     Configuration for Datadog logging integration.
-    
+
     Returns:
         Dictionary with Datadog configuration
     """
@@ -67,16 +67,16 @@ def get_datadog_config() -> Dict[str, Any]:
         "tags": [
             f"env:{os.getenv('ENVIRONMENT', 'development')}",
             f"version:{os.getenv('APP_VERSION', '1.0.0')}",
-            "team:data-engineering"
+            "team:data-engineering",
         ],
-        "hostname": os.getenv("HOSTNAME", "localhost")
+        "hostname": os.getenv("HOSTNAME", "localhost"),
     }
 
 
 def get_splunk_config() -> Dict[str, Any]:
     """
     Configuration for Splunk HTTP Event Collector (HEC) integration.
-    
+
     Returns:
         Dictionary with Splunk configuration
     """
@@ -90,14 +90,14 @@ def get_splunk_config() -> Dict[str, Any]:
         "verify_ssl": os.getenv("SPLUNK_VERIFY_SSL", "true").lower() == "true",
         "timeout": 30,
         "retry_count": 3,
-        "batch_size": 10  # events
+        "batch_size": 10,  # events
     }
 
 
 def get_fluentd_config() -> Dict[str, Any]:
     """
     Configuration for Fluentd/Fluent Bit integration.
-    
+
     Returns:
         Dictionary with Fluentd configuration
     """
@@ -108,16 +108,14 @@ def get_fluentd_config() -> Dict[str, Any]:
         "buffer_size": 8192,
         "timeout": 3.0,
         "nanosecond_precision": True,
-        "msgpack_kwargs": {
-            "use_bin_type": True
-        }
+        "msgpack_kwargs": {"use_bin_type": True},
     }
 
 
 def get_prometheus_config() -> Dict[str, Any]:
     """
     Configuration for Prometheus metrics (complementary to logging).
-    
+
     Returns:
         Dictionary with Prometheus configuration
     """
@@ -129,15 +127,15 @@ def get_prometheus_config() -> Dict[str, Any]:
         "labels": {
             "environment": os.getenv("ENVIRONMENT", "development"),
             "service": "daily-profit-model",
-            "version": os.getenv("APP_VERSION", "1.0.0")
-        }
+            "version": os.getenv("APP_VERSION", "1.0.0"),
+        },
     }
 
 
 def get_loki_config() -> Dict[str, Any]:
     """
     Configuration for Grafana Loki integration.
-    
+
     Returns:
         Dictionary with Loki configuration
     """
@@ -148,22 +146,22 @@ def get_loki_config() -> Dict[str, Any]:
             "app": "daily-profit-model",
             "environment": os.getenv("ENVIRONMENT", "development"),
             "namespace": os.getenv("K8S_NAMESPACE", "default"),
-            "pod": os.getenv("K8S_POD_NAME", "local")
+            "pod": os.getenv("K8S_POD_NAME", "local"),
         },
         "auth": {
             "username": os.getenv("LOKI_USERNAME"),
-            "password": os.getenv("LOKI_PASSWORD")
+            "password": os.getenv("LOKI_PASSWORD"),
         },
         "verify_ssl": os.getenv("LOKI_VERIFY_SSL", "true").lower() == "true",
         "timeout": 10,
-        "compression": "snappy"
+        "compression": "snappy",
     }
 
 
 def get_kafka_config() -> Dict[str, Any]:
     """
     Configuration for Kafka logging integration.
-    
+
     Returns:
         Dictionary with Kafka configuration
     """
@@ -178,7 +176,7 @@ def get_kafka_config() -> Dict[str, Any]:
         "security_protocol": os.getenv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT"),
         "sasl_mechanism": os.getenv("KAFKA_SASL_MECHANISM"),
         "sasl_username": os.getenv("KAFKA_USERNAME"),
-        "sasl_password": os.getenv("KAFKA_PASSWORD")
+        "sasl_password": os.getenv("KAFKA_PASSWORD"),
     }
 
 

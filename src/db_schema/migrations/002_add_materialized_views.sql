@@ -104,18 +104,35 @@ LEFT JOIN LATERAL (
 ) weekly ON true
 WITH DATA;
 
--- Create indexes
-CREATE UNIQUE INDEX idx_mv_account_performance_account_id 
-    ON prop_trading_model.mv_account_performance_summary(account_id);
-CREATE INDEX idx_mv_account_performance_status 
-    ON prop_trading_model.mv_account_performance_summary(status) 
-    WHERE status = 'Active';
-CREATE INDEX idx_mv_account_performance_phase 
-    ON prop_trading_model.mv_account_performance_summary(phase);
-CREATE INDEX idx_mv_account_performance_profit 
-    ON prop_trading_model.mv_account_performance_summary(lifetime_profit DESC);
-CREATE INDEX idx_mv_account_performance_recent_profit 
-    ON prop_trading_model.mv_account_performance_summary(profit_last_30d DESC);
+-- Create indexes (with existence checks)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mv_account_performance_account_id') THEN
+        CREATE UNIQUE INDEX idx_mv_account_performance_account_id 
+            ON prop_trading_model.mv_account_performance_summary(account_id);
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mv_account_performance_status') THEN
+        CREATE INDEX idx_mv_account_performance_status 
+            ON prop_trading_model.mv_account_performance_summary(status) 
+            WHERE status = 'Active';
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mv_account_performance_phase') THEN
+        CREATE INDEX idx_mv_account_performance_phase 
+            ON prop_trading_model.mv_account_performance_summary(phase);
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mv_account_performance_profit') THEN
+        CREATE INDEX idx_mv_account_performance_profit 
+            ON prop_trading_model.mv_account_performance_summary(lifetime_profit DESC);
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mv_account_performance_recent_profit') THEN
+        CREATE INDEX idx_mv_account_performance_recent_profit 
+            ON prop_trading_model.mv_account_performance_summary(profit_last_30d DESC);
+    END IF;
+END $$;
 
 -- ========================================
 -- Daily Trading Statistics
@@ -144,23 +161,34 @@ SELECT
     MAX(net_profit) as max_profit,
     MIN(net_profit) as min_profit,
     -- Day of week analysis
-    EXTRACT(DOW FROM date) as day_of_week,
-    EXTRACT(WEEK FROM date) as week_number,
-    EXTRACT(MONTH FROM date) as month,
-    EXTRACT(YEAR FROM date) as year,
+    EXTRACT(DOW FROM date)::INTEGER as day_of_week,
+    EXTRACT(WEEK FROM date)::INTEGER as week_number,
+    EXTRACT(MONTH FROM date)::INTEGER as month,
+    EXTRACT(YEAR FROM date)::INTEGER as year,
     CURRENT_TIMESTAMP as mv_refreshed_at
 FROM prop_trading_model.raw_metrics_daily
 WHERE date >= CURRENT_DATE - INTERVAL '365 days'
 GROUP BY date
 WITH DATA;
 
--- Create indexes
-CREATE UNIQUE INDEX idx_mv_daily_stats_date 
-    ON prop_trading_model.mv_daily_trading_stats(date);
-CREATE INDEX idx_mv_daily_stats_year_month 
-    ON prop_trading_model.mv_daily_trading_stats(year, month);
-CREATE INDEX idx_mv_daily_stats_dow 
-    ON prop_trading_model.mv_daily_trading_stats(day_of_week);
+-- Create indexes (with existence checks)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mv_daily_stats_date') THEN
+        CREATE UNIQUE INDEX idx_mv_daily_stats_date 
+            ON prop_trading_model.mv_daily_trading_stats(date);
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mv_daily_stats_year_month') THEN
+        CREATE INDEX idx_mv_daily_stats_year_month 
+            ON prop_trading_model.mv_daily_trading_stats(year, month);
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mv_daily_stats_dow') THEN
+        CREATE INDEX idx_mv_daily_stats_dow 
+            ON prop_trading_model.mv_daily_trading_stats(day_of_week);
+    END IF;
+END $$;
 
 -- ========================================
 -- Symbol Performance Statistics
@@ -227,15 +255,29 @@ SELECT
 FROM symbol_stats
 WITH DATA;
 
--- Create indexes
-CREATE UNIQUE INDEX idx_mv_symbol_performance_symbol 
-    ON prop_trading_model.mv_symbol_performance(std_symbol);
-CREATE INDEX idx_mv_symbol_performance_profit 
-    ON prop_trading_model.mv_symbol_performance(total_profit DESC);
-CREATE INDEX idx_mv_symbol_performance_trades 
-    ON prop_trading_model.mv_symbol_performance(total_trades DESC);
-CREATE INDEX idx_mv_symbol_performance_win_rate 
-    ON prop_trading_model.mv_symbol_performance(win_rate DESC);
+-- Create indexes (with existence checks)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mv_symbol_performance_symbol') THEN
+        CREATE UNIQUE INDEX idx_mv_symbol_performance_symbol 
+            ON prop_trading_model.mv_symbol_performance(std_symbol);
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mv_symbol_performance_profit') THEN
+        CREATE INDEX idx_mv_symbol_performance_profit 
+            ON prop_trading_model.mv_symbol_performance(total_profit DESC);
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mv_symbol_performance_trades') THEN
+        CREATE INDEX idx_mv_symbol_performance_trades 
+            ON prop_trading_model.mv_symbol_performance(total_trades DESC);
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mv_symbol_performance_win_rate') THEN
+        CREATE INDEX idx_mv_symbol_performance_win_rate 
+            ON prop_trading_model.mv_symbol_performance(win_rate DESC);
+    END IF;
+END $$;
 
 -- ========================================
 -- Account Trading Patterns
@@ -293,11 +335,19 @@ LEFT JOIN LATERAL (
 GROUP BY account_id, login
 WITH DATA;
 
--- Create indexes
-CREATE UNIQUE INDEX idx_mv_trading_patterns_account_id 
-    ON prop_trading_model.mv_account_trading_patterns(account_id);
-CREATE INDEX idx_mv_trading_patterns_login 
-    ON prop_trading_model.mv_account_trading_patterns(login);
+-- Create indexes (with existence checks)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mv_trading_patterns_account_id') THEN
+        CREATE UNIQUE INDEX idx_mv_trading_patterns_account_id 
+            ON prop_trading_model.mv_account_trading_patterns(account_id);
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mv_trading_patterns_login') THEN
+        CREATE INDEX idx_mv_trading_patterns_login 
+            ON prop_trading_model.mv_account_trading_patterns(login);
+    END IF;
+END $$;
 
 -- ========================================
 -- Market Regime Performance
@@ -326,11 +376,19 @@ WHERE r.date >= CURRENT_DATE - INTERVAL '180 days'
 GROUP BY r.date, r.summary
 WITH DATA;
 
--- Create indexes
-CREATE INDEX idx_mv_regime_performance_date 
-    ON prop_trading_model.mv_market_regime_performance(date DESC);
-CREATE INDEX idx_mv_regime_performance_sentiment 
-    ON prop_trading_model.mv_market_regime_performance(market_sentiment);
+-- Create indexes (with existence checks)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mv_regime_performance_date') THEN
+        CREATE INDEX idx_mv_regime_performance_date 
+            ON prop_trading_model.mv_market_regime_performance(date DESC);
+    END IF;
+    
+    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mv_regime_performance_sentiment') THEN
+        CREATE INDEX idx_mv_regime_performance_sentiment 
+            ON prop_trading_model.mv_market_regime_performance(market_sentiment);
+    END IF;
+END $$;
 
 -- ========================================
 -- Create Refresh Functions

@@ -11,6 +11,7 @@ from datetime import datetime
 
 class RuleType(Enum):
     """Types of data quality rules."""
+
     COMPLETENESS = "completeness"
     VALIDITY = "validity"
     CONSISTENCY = "consistency"
@@ -22,6 +23,7 @@ class RuleType(Enum):
 @dataclass
 class DataQualityRule:
     """Enhanced definition of a data quality rule with production features."""
+
     rule_id: str
     rule_name: str
     rule_type: RuleType
@@ -58,7 +60,7 @@ STAGING_SNAPSHOT_RULES = [
         tags=["critical", "primary_key", "completeness"],
         business_impact="critical",
         owner="data_engineering_team",
-        execution_timeout_seconds=30
+        execution_timeout_seconds=30,
     ),
     DataQualityRule(
         rule_id="STG_002",
@@ -73,7 +75,7 @@ STAGING_SNAPSHOT_RULES = [
         tags=["critical", "authentication", "completeness"],
         business_impact="critical",
         owner="data_engineering_team",
-        execution_timeout_seconds=30
+        execution_timeout_seconds=30,
     ),
     DataQualityRule(
         rule_id="STG_003",
@@ -88,7 +90,7 @@ STAGING_SNAPSHOT_RULES = [
         tags=["critical", "financial", "completeness"],
         business_impact="high",
         owner="business_analytics_team",
-        execution_timeout_seconds=30
+        execution_timeout_seconds=30,
     ),
     DataQualityRule(
         rule_id="STG_004",
@@ -99,9 +101,8 @@ STAGING_SNAPSHOT_RULES = [
         column_name="current_balance",
         condition="current_balance IS NOT NULL",
         threshold=95.0,
-        severity="warning"
+        severity="warning",
     ),
-    
     # Validity Rules
     DataQualityRule(
         rule_id="STG_005",
@@ -116,7 +117,7 @@ STAGING_SNAPSHOT_RULES = [
         tags=["critical", "financial", "validity"],
         business_impact="high",
         owner="business_analytics_team",
-        execution_timeout_seconds=45
+        execution_timeout_seconds=45,
     ),
     DataQualityRule(
         rule_id="STG_006",
@@ -131,7 +132,7 @@ STAGING_SNAPSHOT_RULES = [
         tags=["critical", "business_rules", "validity"],
         business_impact="high",
         owner="business_analytics_team",
-        execution_timeout_seconds=30
+        execution_timeout_seconds=30,
     ),
     DataQualityRule(
         rule_id="STG_007",
@@ -146,7 +147,7 @@ STAGING_SNAPSHOT_RULES = [
         tags=["critical", "risk_management", "validity"],
         business_impact="high",
         owner="risk_management_team",
-        execution_timeout_seconds=30
+        execution_timeout_seconds=30,
     ),
     DataQualityRule(
         rule_id="STG_008",
@@ -161,7 +162,7 @@ STAGING_SNAPSHOT_RULES = [
         tags=["critical", "temporal", "validity"],
         business_impact="high",
         owner="data_engineering_team",
-        execution_timeout_seconds=30
+        execution_timeout_seconds=30,
     ),
     DataQualityRule(
         rule_id="STG_009",
@@ -172,9 +173,8 @@ STAGING_SNAPSHOT_RULES = [
         column_name="phase",
         condition="phase IN ('Funded', 'Challenge', 'Verification') OR phase IS NULL",
         threshold=100.0,
-        severity="warning"
+        severity="warning",
     ),
-    
     # Consistency Rules
     DataQualityRule(
         rule_id="STG_010",
@@ -184,7 +184,7 @@ STAGING_SNAPSHOT_RULES = [
         table_name="stg_accounts_daily_snapshots",
         condition="current_equity <= current_balance * 1.1 OR current_equity IS NULL OR current_balance IS NULL",
         threshold=95.0,
-        severity="warning"
+        severity="warning",
     ),
     DataQualityRule(
         rule_id="STG_011",
@@ -198,7 +198,7 @@ STAGING_SNAPSHOT_RULES = [
         tags=["critical", "temporal", "consistency"],
         business_impact="high",
         owner="business_analytics_team",
-        execution_timeout_seconds=45
+        execution_timeout_seconds=45,
     ),
     DataQualityRule(
         rule_id="STG_012",
@@ -209,9 +209,8 @@ STAGING_SNAPSHOT_RULES = [
         column_name="current_balance",
         condition="current_balance BETWEEN 100 AND 10000000 OR current_balance IS NULL",
         threshold=99.0,
-        severity="warning"
+        severity="warning",
     ),
-    
     # Uniqueness Rules
     DataQualityRule(
         rule_id="STG_013",
@@ -225,9 +224,8 @@ STAGING_SNAPSHOT_RULES = [
         tags=["critical", "primary_key", "uniqueness"],
         business_impact="critical",
         owner="data_engineering_team",
-        execution_timeout_seconds=60
+        execution_timeout_seconds=60,
     ),
-    
     # Timeliness Rules
     DataQualityRule(
         rule_id="STG_014",
@@ -237,8 +235,8 @@ STAGING_SNAPSHOT_RULES = [
         table_name="stg_accounts_daily_snapshots",
         condition="created_at >= NOW() - INTERVAL '48 hours'",
         threshold=90.0,
-        severity="warning"
-    )
+        severity="warning",
+    ),
 ]
 
 
@@ -253,7 +251,7 @@ RAW_ACCOUNTS_RULES = [
         column_name="account_id",
         condition="account_id IS NOT NULL",
         threshold=100.0,
-        severity="error"
+        severity="error",
     ),
     DataQualityRule(
         rule_id="RAW_ACC_002",
@@ -264,8 +262,8 @@ RAW_ACCOUNTS_RULES = [
         column_name="breached",
         condition="breached IN (0, 1)",
         threshold=100.0,
-        severity="error"
-    )
+        severity="error",
+    ),
 ]
 
 
@@ -279,7 +277,7 @@ RAW_METRICS_DAILY_RULES = [
         column_name="date",
         condition="date IS NOT NULL",
         threshold=100.0,
-        severity="error"
+        severity="error",
     ),
     DataQualityRule(
         rule_id="RAW_METRIC_002",
@@ -290,7 +288,7 @@ RAW_METRICS_DAILY_RULES = [
         column_name="win_rate",
         condition="win_rate BETWEEN 0 AND 100 OR win_rate IS NULL",
         threshold=100.0,
-        severity="error"
+        severity="error",
     ),
     DataQualityRule(
         rule_id="RAW_METRIC_003",
@@ -300,22 +298,22 @@ RAW_METRICS_DAILY_RULES = [
         table_name="raw_metrics_daily",
         condition="total_trades = winning_trades + losing_trades OR total_trades IS NULL",
         threshold=99.0,
-        severity="warning"
-    )
+        severity="warning",
+    ),
 ]
 
 
 def get_rules_for_table(table_name: str) -> List[DataQualityRule]:
     """Get all enabled rules for a specific table."""
     all_rules = []
-    
+
     if table_name == "stg_accounts_daily_snapshots":
         all_rules = STAGING_SNAPSHOT_RULES
     elif table_name == "raw_accounts_data":
         all_rules = RAW_ACCOUNTS_RULES
     elif table_name == "raw_metrics_daily":
         all_rules = RAW_METRICS_DAILY_RULES
-    
+
     return [rule for rule in all_rules if rule.enabled]
 
 
@@ -354,22 +352,22 @@ REMEDIATION_ACTIONS = {
             "days_since_first_trade": 0,
             "active_trading_days_count": 0,
             "distance_to_profit_target": "calculate_from_balance",
-            "distance_to_max_drawdown": "calculate_from_balance"
-        }
+            "distance_to_max_drawdown": "calculate_from_balance",
+        },
     },
     "outliers": {
         "action": "flag_and_investigate",
         "description": "Flag outliers for manual investigation",
         "threshold_method": "iqr",  # interquartile range
-        "multiplier": 1.5
+        "multiplier": 1.5,
     },
     "duplicate_records": {
         "action": "keep_latest",
         "description": "Keep only the most recent record for duplicates",
-        "order_by": "ingestion_timestamp DESC"
+        "order_by": "ingestion_timestamp DESC",
     },
     "invalid_values": {
         "action": "quarantine",
-        "description": "Move invalid records to quarantine table for review"
-    }
+        "description": "Move invalid records to quarantine table for review",
+    },
 }

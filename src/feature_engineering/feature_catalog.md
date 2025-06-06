@@ -1,4 +1,4 @@
-# Feature Catalog - Version 1.0.0
+# Feature Catalog - Version 1.1.0
 
 ## Overview
 This document catalogs all features used in the daily profit prediction model, including their definitions, calculations, and data quality considerations.
@@ -16,6 +16,10 @@ Features that remain constant or change infrequently.
 | `profit_target_pct` | DECIMAL | Profit target percentage | stg_accounts_daily_snapshots | Range: 0-1000 |
 | `max_leverage` | INTEGER | Maximum allowed leverage | stg_accounts_daily_snapshots | Range: 1-500 |
 | `is_drawdown_relative` | INTEGER | Whether drawdown is calculated relative to peak (0/1) | stg_accounts_daily_snapshots | Binary: 0 or 1 |
+| `liquidate_friday` | INTEGER | Whether account must liquidate positions on Friday (0/1) | stg_accounts_daily_snapshots | Binary: 0 or 1 |
+| `inactivity_period` | INTEGER | Days allowed without trading before breach | stg_accounts_daily_snapshots | Must be >= 0 |
+| `daily_drawdown_by_balance_equity` | INTEGER | Daily drawdown calculation method (0=balance, 1=higher of balance/equity) | stg_accounts_daily_snapshots | Binary: 0 or 1 |
+| `enable_consistency` | INTEGER | Whether consistency rules apply to the account (0/1) | stg_accounts_daily_snapshots | Binary: 0 or 1 |
 
 ### 2. Dynamic Features (Current Account State)
 Features that represent the account state as of the feature_date.
@@ -156,9 +160,10 @@ Date and time-based features.
 - Sharpe ratio: Capped between -10 and 10 for stability
 
 ### 4. Version Control
-- Current version: 1.0.0
+- Current version: 1.1.0
 - Feature changes tracked in feature_versions table
 - Hash generated from sorted feature list for consistency
+- Version 1.1.0 changes: Added liquidate_friday, inactivity_period, daily_drawdown_by_balance_equity, enable_consistency features
 
 ## Usage Notes
 

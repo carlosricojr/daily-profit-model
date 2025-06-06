@@ -163,9 +163,8 @@ BEGIN
         -- Log progress
         RAISE NOTICE 'Copied % rows to raw_trades_closed', offset_val;
         
-        -- Allow other transactions
-        COMMIT;
-        BEGIN;
+        -- Note: Cannot use COMMIT/BEGIN inside DO block
+        -- The entire migration runs as one transaction
     END LOOP;
 END $$;
 
