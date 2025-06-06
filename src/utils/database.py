@@ -7,7 +7,6 @@ import os
 import logging
 from typing import Optional, Dict, Any, List
 from contextlib import contextmanager
-import psycopg2
 from psycopg2.extras import RealDictCursor, execute_batch
 from psycopg2.pool import SimpleConnectionPool
 import pandas as pd

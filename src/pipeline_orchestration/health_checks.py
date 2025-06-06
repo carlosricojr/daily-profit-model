@@ -8,8 +8,8 @@ import logging
 import psutil
 import time
 import json
-from typing import Dict, List, Any, Optional, Tuple
-from datetime import datetime, timedelta
+from typing import Dict, List, Any, Optional
+from datetime import datetime
 import requests
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -513,7 +513,6 @@ class HealthChecker:
         
         # Test with multiple concurrent requests
         import concurrent.futures
-        import threading
         
         def make_request():
             try:

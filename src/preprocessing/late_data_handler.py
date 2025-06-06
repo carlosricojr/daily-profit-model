@@ -4,9 +4,8 @@ Manages detection, processing, and backfilling of late data.
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple, Set
+from typing import Dict, List, Optional
 from datetime import datetime, date, timedelta
-import pandas as pd
 from dataclasses import dataclass
 from enum import Enum
 

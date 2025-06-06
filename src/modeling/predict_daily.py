@@ -9,12 +9,9 @@ import logging
 import json
 import joblib
 import warnings
-import asyncio
-import threading
 from datetime import datetime, timedelta, date
-from typing import Dict, List, Any, Optional, Tuple, Union
+from typing import Dict, List, Any, Optional
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 import numpy as np

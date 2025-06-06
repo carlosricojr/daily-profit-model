@@ -3,10 +3,8 @@ Tests for the enhanced trades ingester with checkpointing.
 """
 
 import pytest
-import json
-from datetime import datetime, date, timedelta
-from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock, call
+from datetime import date
+from unittest.mock import Mock, patch
 import tempfile
 import shutil
 
@@ -77,7 +75,7 @@ class TestTradesIngester:
         assert ingester.db_manager is not None
         assert ingester.api_client is not None
         assert ingester.checkpoint_manager is not None
-        assert ingester.metrics['api_calls'] == 0
+        assert ingester.metrics.api_calls == 0
     
     @patch('data_ingestion.ingest_trades.get_db_manager')
     @patch('data_ingestion.ingest_trades.RiskAnalyticsAPIClient')
@@ -85,29 +83,35 @@ class TestTradesIngester:
         """Test trade record validation."""
         ingester = TradesIngester()
         
-        # Valid closed trade
+        # Valid closed trade (using API field names)
         valid_closed = {
-            'trade_id': '123',
-            'account_id': '456',
+            'tradeId': '123',
+            'accountId': '456',
             'login': 'user1',
             'symbol': 'EURUSD',
             'side': 'buy',
-            'open_time': datetime.now(),
-            'close_time': datetime.now(),
+            'openTime': '2024-01-15T10:00:00Z',
+            'closeTime': '2024-01-15T11:00:00Z',
             'profit': 100.0,
             'lots': 0.1
         }
-        assert ingester._validate_trade_record(valid_closed, 'closed')
+        is_valid, errors = ingester._validate_trade_record(valid_closed, 'closed')
+        assert is_valid is True
+        assert len(errors) == 0
         
         # Invalid - missing required field
         invalid = valid_closed.copy()
-        del invalid['trade_id']
-        assert not ingester._validate_trade_record(invalid, 'closed')
+        del invalid['tradeId']
+        is_valid, errors = ingester._validate_trade_record(invalid, 'closed')
+        assert is_valid is False
+        assert any('Missing required field: tradeId' in error for error in errors)
         
         # Invalid - negative lots
         invalid = valid_closed.copy()
         invalid['lots'] = -0.1
-        assert not ingester._validate_trade_record(invalid, 'closed')
+        is_valid, errors = ingester._validate_trade_record(invalid, 'closed')
+        assert is_valid is False
+        assert any('Lots must be positive' in error for error in errors)
     
     @patch('data_ingestion.ingest_trades.get_db_manager')
     @patch('data_ingestion.ingest_trades.RiskAnalyticsAPIClient')
@@ -155,7 +159,9 @@ class TestTradesIngester:
             mock_api_client.return_value = mock_api_instance
             
             mock_db_instance = Mock()
-            mock_db_instance.model_db.execute_command.return_value = 0
+            mock_db_instance.log_pipeline_execution = Mock()
+            mock_db_instance.model_db = Mock()
+            mock_db_instance.model_db.execute_command = Mock(return_value=0)
             mock_db_manager.return_value = mock_db_instance
             
             # Create ingester with custom checkpoint manager
@@ -171,7 +177,11 @@ class TestTradesIngester:
             )
             
             # Should have loaded checkpoint
-            assert result == 5000  # Initial records from checkpoint
+            # Should have preserved checkpoint metrics
+            assert ingester.metrics.total_records == 5000  # From checkpoint
+            # No new records in this run (API returned empty)
+            assert ingester.metrics.new_records == 0  # No new records added in this run
+            assert result == 0  # Returns new_records from this run
     
     @patch('data_ingestion.ingest_trades.get_db_manager')
     @patch('data_ingestion.ingest_trades.RiskAnalyticsAPIClient')
@@ -190,8 +200,12 @@ class TestTradesIngester:
         
         # Mock DB
         mock_db_instance = Mock()
-        mock_db_instance.model_db.get_connection.return_value.__enter__ = Mock()
-        mock_db_instance.model_db.get_connection.return_value.__exit__ = Mock()
+        mock_db_instance.log_pipeline_execution = Mock()
+        mock_db_instance.model_db = Mock()
+        mock_conn = Mock()
+        mock_conn.__enter__ = Mock(return_value=mock_conn)
+        mock_conn.__exit__ = Mock(return_value=None)
+        mock_db_instance.model_db.get_connection.return_value = mock_conn
         mock_db_manager.return_value = mock_db_instance
         
         ingester = TradesIngester()
@@ -204,8 +218,8 @@ class TestTradesIngester:
         )
         
         # Check metrics
-        assert ingester.metrics['api_calls'] > 0
-        assert ingester.metrics['validation_errors'] >= 0
+        assert ingester.metrics.api_calls > 0
+        assert len(ingester.metrics.validation_errors) >= 0
     
     @patch('data_ingestion.ingest_trades.get_db_manager')
     @patch('data_ingestion.ingest_trades.RiskAnalyticsAPIClient')
@@ -218,7 +232,9 @@ class TestTradesIngester:
         mock_api_client.return_value = mock_api_instance
         
         # Mock DB
-        mock_db_manager.return_value = Mock()
+        mock_db_instance = Mock()
+        mock_db_instance.log_pipeline_execution = Mock()
+        mock_db_manager.return_value = mock_db_instance
         
         ingester = TradesIngester()
         
@@ -230,7 +246,8 @@ class TestTradesIngester:
                 end_date=date(2024, 1, 15)
             )
         
-        assert ingester.metrics['api_errors'] > 0
+        # API error should be counted
+        assert ingester.metrics.api_errors == 1  # API error is now tracked
     
     @patch('data_ingestion.ingest_trades.get_db_manager')
     @patch('data_ingestion.ingest_trades.RiskAnalyticsAPIClient')
@@ -245,12 +262,15 @@ class TestTradesIngester:
         mock_cursor.fetchone.side_effect = [(100,), (101,)]  # Before and after counts
         
         mock_conn = Mock()
-        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
-        mock_conn.cursor.return_value.__exit__ = Mock(return_value=None)
+        mock_conn.__enter__ = Mock(return_value=mock_conn)
+        mock_conn.__exit__ = Mock(return_value=None)
+        mock_conn.cursor = Mock(return_value=mock_cursor)
+        mock_cursor.__enter__ = Mock(return_value=mock_cursor)
+        mock_cursor.__exit__ = Mock(return_value=None)
         
         mock_db_instance = Mock()
-        mock_db_instance.model_db.get_connection.return_value.__enter__.return_value = mock_conn
-        mock_db_instance.model_db.get_connection.return_value.__exit__ = Mock(return_value=None)
+        mock_db_instance.model_db = Mock()
+        mock_db_instance.model_db.get_connection.return_value = mock_conn
         mock_db_manager.return_value = mock_db_instance
         
         ingester = TradesIngester()
@@ -263,7 +283,7 @@ class TestTradesIngester:
         success = ingester._insert_trades_batch(batch_data, 'test_table')
         
         assert success
-        assert ingester.metrics['duplicate_records'] == 4  # 5 total - 1 new
+        assert ingester.metrics.duplicate_records == 4  # 5 total - 1 new
 
 
 if __name__ == '__main__':

@@ -3,22 +3,17 @@ Great Expectations configuration and integration for data validation.
 """
 
 import os
-import json
 from typing import Dict, List, Optional, Any
-from datetime import datetime, date
+from datetime import date
 import logging
 
-import great_expectations as ge
-from great_expectations.core import ExpectationConfiguration, ExpectationSuite
+from great_expectations.core import ExpectationConfiguration
 from great_expectations.checkpoint import SimpleCheckpoint
 from great_expectations.data_context import DataContext
 from great_expectations.data_context.types.base import (
-    DataContextConfig,
-    DatasourceConfig,
-    CheckpointConfig
+    DataContextConfig
 )
 from great_expectations.core.batch import BatchRequest
-from great_expectations.validator.validator import Validator
 
 logger = logging.getLogger(__name__)
 

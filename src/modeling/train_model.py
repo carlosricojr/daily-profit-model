@@ -9,15 +9,14 @@ import logging
 import json
 import joblib
 import warnings
-from datetime import datetime, date
-from typing import Dict, List, Any, Optional, Tuple
+from datetime import datetime
+from typing import Dict, Any, Optional, Tuple
 from pathlib import Path
 import argparse
 
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
-from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
 import optuna

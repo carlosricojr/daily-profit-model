@@ -293,16 +293,16 @@ class AlertManager:
     def _format_alert_text(self, alert: DataQualityAlert) -> str:
         """Format alert as plain text."""
         lines = [
-            f"DATA QUALITY ALERT",
-            f"==================",
-            f"",
+            "DATA QUALITY ALERT",
+            "==================",
+            "",
             f"Severity: {alert.severity.value.upper()}",
             f"Type: {alert.alert_type}",
             f"Time: {alert.timestamp.strftime('%Y-%m-%d %H:%M:%S')}",
-            f"",
+            "",
             f"Title: {alert.title}",
             f"Description: {alert.description}",
-            f""
+            ""
         ]
         
         if alert.affected_table:
@@ -312,17 +312,17 @@ class AlertManager:
         
         if alert.metrics:
             lines.extend([
-                f"",
-                f"Metrics:",
-                f"--------"
+                "",
+                "Metrics:",
+                "--------"
             ])
             for key, value in alert.metrics.items():
                 lines.append(f"  {key}: {value}")
         
         if alert.recommended_action:
             lines.extend([
-                f"",
-                f"Recommended Action:",
+                "",
+                "Recommended Action:",
                 f"{alert.recommended_action}"
             ])
         

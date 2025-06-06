@@ -7,7 +7,6 @@ import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime, date
 from pathlib import Path
-import pickle
 
 from utils.database import get_db_manager
 

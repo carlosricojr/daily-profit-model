@@ -4,7 +4,7 @@ Provides workflow orchestration with advanced monitoring and retry capabilities.
 """
 
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import logging
 
 from airflow import DAG
@@ -12,13 +12,10 @@ from airflow.operators.python_operator import PythonOperator
 from airflow.operators.bash_operator import BashOperator
 from airflow.operators.dummy_operator import DummyOperator
 from airflow.models import Variable
-from airflow.sensors.sql_sensor import SqlSensor
-from airflow.sensors.filesystem import FileSensor
 from airflow.hooks.postgres_hook import PostgresHook
 from airflow.utils.decorators import apply_defaults
 from airflow.utils.email import send_email
 from airflow.utils.trigger_rule import TriggerRule
-from airflow.exceptions import AirflowSkipException
 
 logger = logging.getLogger(__name__)
 
@@ -275,7 +272,7 @@ def cleanup_old_data(**context) -> None:
     for query in cleanup_queries:
         try:
             result = hook.run(query)
-            logger.info(f"Cleanup query executed successfully")
+            logger.info("Cleanup query executed successfully")
         except Exception as e:
             logger.error(f"Cleanup query failed: {str(e)}")
 

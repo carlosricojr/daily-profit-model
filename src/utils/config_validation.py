@@ -1,11 +1,11 @@
 """
-Version 1: Conservative - Configuration validation utilities.
+Configuration validation utilities.
 Validates environment variables and configuration settings.
 """
 
 import os
-from typing import Dict, Any, List, Optional, Union
-from dataclasses import dataclass, field
+from typing import Dict, Any, List, Optional, Union, Callable
+from dataclasses import dataclass
 import json
 
 from .logging_config import get_logger
@@ -21,7 +21,7 @@ class ConfigField:
     required: bool = True
     default: Any = None
     type: type = str
-    validator: Optional[callable] = None
+    validator: Optional[Callable] = None
     description: str = ""
     choices: Optional[List[Any]] = None
     min_value: Optional[Union[int, float]] = None
@@ -50,9 +50,6 @@ class ConfigValidator:
             
         Returns:
             Validated value
-            
-        Raises:
-            ConfigurationError: If validation fails
         """
         # Get value from environment
         raw_value = os.getenv(field.name)
@@ -176,261 +173,3 @@ class ConfigValidator:
         )
         
         return self.config
-
-
-# Database configuration fields
-DATABASE_CONFIG_FIELDS = [
-    ConfigField(
-        name="DB_HOST",
-        required=True,
-        type=str,
-        description="Database host"
-    ),
-    ConfigField(
-        name="DB_PORT",
-        required=False,
-        default=5432,
-        type=int,
-        min_value=1,
-        max_value=65535,
-        description="Database port"
-    ),
-    ConfigField(
-        name="DB_NAME",
-        required=True,
-        type=str,
-        description="Database name"
-    ),
-    ConfigField(
-        name="DB_USER",
-        required=True,
-        type=str,
-        description="Database user"
-    ),
-    ConfigField(
-        name="DB_PASSWORD",
-        required=True,
-        type=str,
-        description="Database password"
-    ),
-    ConfigField(
-        name="DB_CONNECTION_TIMEOUT",
-        required=False,
-        default=30,
-        type=int,
-        min_value=1,
-        max_value=300,
-        description="Database connection timeout in seconds"
-    ),
-    ConfigField(
-        name="DB_QUERY_TIMEOUT",
-        required=False,
-        default=300,
-        type=int,
-        min_value=1,
-        max_value=3600,
-        description="Database query timeout in seconds"
-    ),
-    ConfigField(
-        name="DB_MAX_RETRIES",
-        required=False,
-        default=3,
-        type=int,
-        min_value=0,
-        max_value=10,
-        description="Maximum number of database retry attempts"
-    ),
-    ConfigField(
-        name="DB_POOL_MIN_SIZE",
-        required=False,
-        default=1,
-        type=int,
-        min_value=1,
-        max_value=10,
-        description="Minimum database connection pool size"
-    ),
-    ConfigField(
-        name="DB_POOL_MAX_SIZE",
-        required=False,
-        default=10,
-        type=int,
-        min_value=1,
-        max_value=100,
-        description="Maximum database connection pool size"
-    ),
-]
-
-# API configuration fields
-API_CONFIG_FIELDS = [
-    ConfigField(
-        name="RISK_API_KEY",
-        required=True,
-        type=str,
-        description="API key for authentication"
-    ),
-    ConfigField(
-        name="RISK_API_BASE_URL",
-        required=False,
-        default="https://easton.apis.arizet.io/risk-analytics/tft/external/",
-        type=str,
-        validator=lambda x: x.startswith(('http://', 'https://')),
-        description="Base URL for the API"
-    ),
-    ConfigField(
-        name="API_REQUESTS_PER_SECOND",
-        required=False,
-        default=10,
-        type=int,
-        min_value=1,
-        max_value=100,
-        description="API rate limit (requests per second)"
-    ),
-    ConfigField(
-        name="API_MAX_RETRIES",
-        required=False,
-        default=3,
-        type=int,
-        min_value=0,
-        max_value=10,
-        description="Maximum number of API retry attempts"
-    ),
-    ConfigField(
-        name="API_TIMEOUT",
-        required=False,
-        default=30,
-        type=int,
-        min_value=1,
-        max_value=300,
-        description="API request timeout in seconds"
-    ),
-    ConfigField(
-        name="API_VERIFY_SSL",
-        required=False,
-        default=True,
-        type=bool,
-        description="Whether to verify SSL certificates"
-    ),
-]
-
-# Logging configuration fields
-LOGGING_CONFIG_FIELDS = [
-    ConfigField(
-        name="LOG_LEVEL",
-        required=False,
-        default="INFO",
-        type=str,
-        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        description="Logging level"
-    ),
-    ConfigField(
-        name="LOG_DIR",
-        required=False,
-        default="logs",
-        type=str,
-        description="Directory for log files"
-    ),
-    ConfigField(
-        name="LOG_FORMAT",
-        required=False,
-        default="json",
-        type=str,
-        choices=["json", "text"],
-        description="Log format (json or text)"
-    ),
-    ConfigField(
-        name="LOG_MAX_BYTES",
-        required=False,
-        default=10485760,  # 10MB
-        type=int,
-        min_value=1048576,  # 1MB
-        max_value=104857600,  # 100MB
-        description="Maximum log file size in bytes"
-    ),
-    ConfigField(
-        name="LOG_BACKUP_COUNT",
-        required=False,
-        default=5,
-        type=int,
-        min_value=0,
-        max_value=100,
-        description="Number of log backup files to keep"
-    ),
-]
-
-
-def validate_all_config() -> Dict[str, Any]:
-    """
-    Validate all configuration settings.
-    
-    Returns:
-        Dictionary with all validated configuration
-        
-    Raises:
-        ConfigurationError: If validation fails
-    """
-    validator = ConfigValidator()
-    
-    all_fields = DATABASE_CONFIG_FIELDS + API_CONFIG_FIELDS + LOGGING_CONFIG_FIELDS
-    config = validator.validate_all(all_fields)
-    
-    # Group configuration by category
-    grouped_config = {
-        'database': {k: v for k, v in config.items() if k.startswith('DB_')},
-        'api': {k: v for k, v in config.items() if k.startswith('API_')},
-        'logging': {k: v for k, v in config.items() if k.startswith('LOG_')}
-    }
-    
-    return grouped_config
-
-
-def print_config_template():
-    """Print a template .env file with all configuration options."""
-    all_fields = DATABASE_CONFIG_FIELDS + API_CONFIG_FIELDS + LOGGING_CONFIG_FIELDS
-    
-    print("# Daily Profit Model Configuration Template")
-    print("# Copy this to .env and fill in the values\n")
-    
-    current_category = None
-    
-    for field in all_fields:
-        # Determine category
-        if field.name.startswith('DB_'):
-            category = "Database Configuration"
-        elif field.name.startswith('API_'):
-            category = "API Configuration"
-        elif field.name.startswith('LOG_'):
-            category = "Logging Configuration"
-        else:
-            category = "Other Configuration"
-        
-        # Print category header if changed
-        if category != current_category:
-            print(f"\n# {category}")
-            current_category = category
-        
-        # Print field description
-        print(f"# {field.description}")
-        if field.choices:
-            print(f"# Choices: {', '.join(map(str, field.choices))}")
-        if field.min_value is not None or field.max_value is not None:
-            range_str = f"# Range: "
-            if field.min_value is not None:
-                range_str += f"{field.min_value} <= value"
-            if field.max_value is not None:
-                if field.min_value is not None:
-                    range_str += f" <= {field.max_value}"
-                else:
-                    range_str += f"value <= {field.max_value}"
-            print(range_str)
-        
-        # Print field with default value
-        if field.required:
-            print(f"{field.name}=")
-        else:
-            print(f"# {field.name}={field.default}")
-        print()
-
-
-if __name__ == "__main__":
-    # If run directly, print configuration template
-    print_config_template()

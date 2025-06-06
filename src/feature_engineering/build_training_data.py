@@ -7,9 +7,8 @@ import os
 import sys
 import logging
 from datetime import datetime, timedelta, date
-from typing import Optional
+from typing import Optional, Dict, Any
 import argparse
-import pandas as pd
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -316,7 +315,7 @@ def main():
             
             if 'target_statistics' in validation:
                 stats = validation['target_statistics']
-                logger.info(f"Target PnL statistics:")
+                logger.info("Target PnL statistics:")
                 logger.info(f"  - Mean: ${stats['mean_pnl']:.2f}")
                 logger.info(f"  - Std Dev: ${stats['std_pnl']:.2f}")
                 logger.info(f"  - Min: ${stats['min_pnl']:.2f}")

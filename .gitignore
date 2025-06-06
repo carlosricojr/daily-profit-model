@@ -205,3 +205,6 @@ archive/
 
 # Ignore repomix generated files
 repomix-output.txt
+
+#Ignore claude
+.claude/

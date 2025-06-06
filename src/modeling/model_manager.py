@@ -7,12 +7,11 @@ import os
 import sys
 import logging
 import json
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 import argparse
 
 import pandas as pd
-import numpy as np
 from pathlib import Path
 
 # Add parent directory to path for imports
@@ -604,7 +603,7 @@ def main():
                 print("=" * 80)
                 
                 # Summary stats
-                print(f"\nSummary:")
+                print("\nSummary:")
                 print(f"Average MAE: ${performance_df['mae'].mean():.2f}")
                 print(f"Average Direction Accuracy: {performance_df['direction_accuracy'].mean():.1%}")
                 print(f"Total Accounts Evaluated: {performance_df['accounts_evaluated'].sum()}")
@@ -654,7 +653,7 @@ def main():
             active_model = manager.get_active_model()
             
             if active_model:
-                print(f"\nCurrently Active Model:")
+                print("\nCurrently Active Model:")
                 print(f"Version: {active_model['model_version']}")
                 print(f"Type: {active_model.get('model_type', 'Unknown')}")
                 print(f"Test MAE: ${active_model.get('test_mae', 0):.2f}")

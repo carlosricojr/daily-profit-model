@@ -4,21 +4,19 @@ Uses multiple algorithms to detect different types of anomalies.
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple, Any
-from datetime import datetime, date, timedelta
+from typing import Dict, List, Optional
+from datetime import datetime, date
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass
 from enum import Enum
 
 # Anomaly detection libraries
-from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
 from pyod.models.iforest import IForest
 from pyod.models.lof import LOF
 from pyod.models.auto_encoder import AutoEncoder
-from pyod.models.combination import average, maximization
+from pyod.models.combination import average
 import prophet
 from prophet import Prophet
 
@@ -219,7 +217,7 @@ class AnomalyDetector:
                     anomaly_type=AnomalyType.POINT_ANOMALY,
                     anomaly_score=float(ensemble_scores[idx]),
                     feature_contributions=feature_scores,
-                    description=f"Unusual combination of metrics detected",
+                    description="Unusual combination of metrics detected",
                     severity=severity,
                     recommended_action="Review account activity for unusual patterns"
                 ))

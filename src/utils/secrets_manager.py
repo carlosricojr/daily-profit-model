@@ -6,13 +6,13 @@ Implements secure secret storage and retrieval with encryption.
 import os
 import json
 import base64
-from typing import Dict, Any, Optional, List
+from typing import Dict, Optional, List
 from pathlib import Path
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import keyring
-from datetime import datetime, timedelta
+from datetime import datetime
 import threading
 
 from .logging_config import get_logger

@@ -5,9 +5,8 @@ Implements Prometheus metrics, custom metric types, and metric aggregation.
 
 import time
 import os
-from typing import Dict, Any, Optional, List, Callable, Union
+from typing import Dict, Optional, List
 from collections import defaultdict, deque
-from datetime import datetime
 import threading
 from functools import wraps
 from contextlib import contextmanager

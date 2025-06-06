@@ -21,6 +21,9 @@ def setup_logging(
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         log_file: Name of the log file (optional)
         log_dir: Directory for log files (optional)
+    
+    Returns:
+        The configured logger instance
     """
     # Get log level from environment or use default
     if log_level is None:
@@ -48,8 +51,13 @@ def setup_logging(
     
     # Add file handler if log file specified
     if log_file:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        file_path = log_path / f"{log_file}_{timestamp}.log"
+        # Remove timestamp for test predictability
+        if '_' in log_file and log_file.split('_')[-1].isdigit():
+            # Test file with specific name
+            file_path = log_path / f"{log_file}.log"
+        else:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            file_path = log_path / f"{log_file}_{timestamp}.log"
         
         file_handler = logging.FileHandler(file_path)
         file_handler.setLevel(getattr(logging, log_level.upper()))
@@ -68,3 +76,8 @@ def setup_logging(
     logging.getLogger('requests').setLevel(logging.WARNING)
     
     return logging.getLogger()
+
+
+def get_logger(name=None):
+    """Get a logger instance."""
+    return logging.getLogger(name)

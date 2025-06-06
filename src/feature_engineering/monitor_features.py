@@ -7,12 +7,9 @@ import os
 import sys
 import logging
 from datetime import datetime, timedelta, date
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import pandas as pd
-import numpy as np
-import json
 import argparse
-from collections import defaultdict
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 

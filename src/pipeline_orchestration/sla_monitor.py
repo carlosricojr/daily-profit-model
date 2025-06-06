@@ -8,8 +8,8 @@ import logging
 import smtplib
 from email.mime.text import MimeText
 from email.mime.multipart import MimeMultipart
-from typing import Dict, List, Any, Optional, Callable
-from datetime import datetime, timedelta
+from typing import Dict, List, Any, Optional
+from datetime import datetime
 from dataclasses import dataclass, asdict
 from pathlib import Path
 import os

@@ -9,8 +9,6 @@ import logging
 from datetime import datetime, timedelta, date
 from typing import Optional
 import argparse
-import pandas as pd
-import numpy as np
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

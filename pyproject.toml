@@ -20,39 +20,34 @@ dependencies = [
     "scikit-learn>=1.6.1",
     "shap>=0.47.2",
     "tqdm>=4.67.1",
-    
-    # Enhanced orchestration and monitoring  
+    # Enhanced orchestration and monitoring
     "psutil>=5.9.0",
-    
     # Data quality and validation
     "great-expectations>=0.15.0",
     "pydantic>=1.10.0",
-    
     # Monitoring and observability
     "prometheus-client>=0.15.0",
     "structlog>=22.3.0",
     "opentelemetry-api>=1.15.0",
     "opentelemetry-sdk>=1.15.0",
-    
     # Database migrations
     "alembic>=1.8.0",
-    
     # Additional ML libraries
     "scipy>=1.10.0",
     "matplotlib>=3.6.0",
     "seaborn>=0.12.0",
-    
     # Performance and utilities
     "joblib>=1.2.0",
     "redis>=4.5.0",
     "pyyaml>=6.0",
-    
     # Additional dependencies for consolidated system
     "plotly>=5.12.0",
     "pyod>=1.0.0",
     "dash>=2.8.0",
     "dash-bootstrap-components>=1.2.0",
     "sqlalchemy>=1.4.0",
+    "pytest>=8.4.0",
+    "ruff>=0.11.13",
 ]
 
 [project.urls]

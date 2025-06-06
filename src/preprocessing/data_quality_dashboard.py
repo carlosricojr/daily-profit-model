@@ -4,11 +4,10 @@ Provides real-time visualization of data quality metrics.
 """
 
 import logging
-from typing import Dict, List, Optional, Any
-from datetime import datetime, date, timedelta
+from typing import Dict, List, Any
+from datetime import datetime, timedelta
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
 from plotly.subplots import make_subplots
 
 try:

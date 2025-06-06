@@ -11,14 +11,13 @@ import functools
 import threading
 import psutil
 import gc
-from typing import Callable, Dict, Any, Optional, List, Tuple
+from typing import Callable, Dict, Any, Optional, List
 from contextlib import contextmanager
-from datetime import datetime
 import tracemalloc
 import numpy as np
 
 from .logging_config import get_logger
-from .metrics import get_aggregated_metrics, timer
+from .metrics import get_aggregated_metrics
 
 
 logger = get_logger(__name__)
@@ -359,7 +358,6 @@ def optimize_dataframe_memory(df):
     Returns:
         Optimized DataFrame
     """
-    import pandas as pd
     
     initial_memory = df.memory_usage(deep=True).sum() / 1024 / 1024
     
@@ -396,7 +394,7 @@ def optimize_dataframe_memory(df):
     final_memory = df.memory_usage(deep=True).sum() / 1024 / 1024
     
     logger.info(
-        f"DataFrame memory optimized",
+        "DataFrame memory optimized",
         extra={'extra_fields': {
             'initial_memory_mb': initial_memory,
             'final_memory_mb': final_memory,

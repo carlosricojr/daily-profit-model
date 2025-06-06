@@ -4,7 +4,7 @@ Unit tests for data validation in preprocessing pipeline.
 
 import unittest
 from datetime import date, datetime
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock
 import sys
 import os
 
@@ -12,10 +12,10 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from preprocessing.data_validator import (
-    DataValidator, ValidationResult, ValidationStatus, DataProfile
+    DataValidator, ValidationResult, ValidationStatus
 )
 from preprocessing.data_quality_rules import (
-    DataQualityRule, RuleType, get_rules_for_table
+    RuleType, get_rules_for_table
 )
 
 
@@ -213,8 +213,8 @@ class TestDataValidator(unittest.TestCase):
         self.assertEqual(profile.date_range[0], date(2024, 1, 1))
     
     def test_generate_validation_report(self):
-        """Test validation report generation."""
-        # Add some test results
+        """Test enhanced validation report generation with production features."""
+        # Add some test results with enhanced features
         self.validator.validation_results = [
             ValidationResult(
                 rule_name="test_passed",
@@ -236,6 +236,13 @@ class TestDataValidator(unittest.TestCase):
             )
         ]
         
+        # Test metrics tracking
+        self.validator.validation_metrics = {
+            'total_checks': 5,
+            'execution_time': 2.5,
+            'errors_encountered': 1
+        }
+        
         report = self.validator.generate_validation_report()
         
         # Check report contains expected sections
@@ -249,6 +256,100 @@ class TestDataValidator(unittest.TestCase):
         self.assertIn("WARNINGS", report)
         self.assertIn("test_failed", report)
         self.assertIn("test_warning", report)
+        
+        # Test enhanced validator features
+        self.assertTrue(self.validator.enable_profiling)
+        self.assertEqual(self.validator.timeout_seconds, 300)  # Default timeout
+
+
+class TestEnhancedValidationFeatures(unittest.TestCase):
+    """Test cases for enhanced production validation features."""
+    
+    def setUp(self):
+        """Set up enhanced test fixtures."""
+        self.mock_db_manager = Mock()
+        self.mock_db_manager.model_db = Mock()
+        self.validator = DataValidator(
+            self.mock_db_manager,
+            enable_profiling=True,
+            timeout_seconds=60
+        )
+    
+    def test_enhanced_validator_initialization(self):
+        """Test enhanced validator initialization with production features."""
+        # Test default settings
+        validator_default = DataValidator(self.mock_db_manager)
+        self.assertTrue(validator_default.enable_profiling)
+        self.assertEqual(validator_default.timeout_seconds, 300)
+        
+        # Test custom settings
+        validator_custom = DataValidator(
+            self.mock_db_manager,
+            enable_profiling=False,
+            timeout_seconds=120
+        )
+        self.assertFalse(validator_custom.enable_profiling)
+        self.assertEqual(validator_custom.timeout_seconds, 120)
+    
+    def test_validation_metrics_tracking(self):
+        """Test validation metrics are properly tracked."""
+        # Mock basic responses
+        self.mock_db_manager.model_db.execute_query.side_effect = [
+            [{'count': 100}],  # Has data
+        ]
+        
+        # Run validation
+        from datetime import date
+        results = self.validator.validate_staging_snapshot(date(2024, 1, 15))
+        
+        # Check metrics are tracked
+        self.assertGreater(self.validator.validation_metrics['total_checks'], 0)
+        self.assertGreaterEqual(self.validator.validation_metrics['execution_time'], 0)
+        self.assertGreaterEqual(self.validator.validation_metrics['errors_encountered'], 0)
+        
+        # Check that validation start time was set
+        self.assertIsNotNone(self.validator.validation_start_time)
+    
+    def test_enhanced_error_handling(self):
+        """Test enhanced error handling in validation."""
+        # Mock database error
+        self.mock_db_manager.model_db.execute_query.side_effect = Exception("Database connection failed")
+        
+        # Run validation - should handle error gracefully
+        from datetime import date
+        results = self.validator.validate_staging_snapshot(date(2024, 1, 15))
+        
+        # Should have error result
+        error_results = [r for r in results if r.rule_name == "validation_system_error"]
+        self.assertEqual(len(error_results), 1)
+        self.assertEqual(error_results[0].status, ValidationStatus.FAILED)
+        self.assertIn("critical error", error_results[0].message.lower())
+    
+    def test_enhanced_logging_structure(self):
+        """Test that enhanced logging produces structured output."""
+        # This test verifies that the enhanced logging structure is working
+        # In production, this would help with log aggregation and monitoring
+        self.mock_db_manager.model_db.execute_query.side_effect = [
+            [{'count': 100}],  # Has data
+            [{'total_records': 100, 'null_account_id': 0, 'null_login': 0, 
+              'null_balance': 0, 'null_equity': 0, 'null_starting_balance': 0}],
+            [{'total': 100, 'negative_balance': 0, 'negative_equity': 0,
+              'invalid_profit_target': 0, 'invalid_max_dd': 0, 'negative_days': 0,
+              'min_balance': 1000, 'max_balance': 50000, 'avg_balance': 25000}],
+            [{'total': 100, 'equity_exceeds_balance': 0, 'equity_too_low': 0}],
+            [{'invalid_days': 0}],
+            [{'missing_plans': 0}],
+            [{'oldest_record': datetime.now(), 'newest_record': datetime.now(),
+              'total_records': 100}]
+        ]
+        
+        from datetime import date
+        results = self.validator.validate_staging_snapshot(date(2024, 1, 15))
+        
+        # Verify structured metrics are available
+        self.assertIn('total_checks', self.validator.validation_metrics)
+        self.assertIn('execution_time', self.validator.validation_metrics)
+        self.assertIn('errors_encountered', self.validator.validation_metrics)
 
 
 class TestDataQualityRules(unittest.TestCase):
@@ -288,6 +389,67 @@ class TestDataQualityRules(unittest.TestCase):
         critical_rules = get_critical_rules()
         self.assertGreater(len(critical_rules), 0)
         self.assertTrue(all(r.severity == "error" for r in critical_rules))
+    
+    def test_enhanced_rule_features(self):
+        """Test enhanced rule features for production environments."""
+        staging_rules = get_rules_for_table("stg_accounts_daily_snapshots")
+        
+        # Test that enhanced attributes exist
+        first_rule = staging_rules[0]
+        self.assertTrue(hasattr(first_rule, 'tags'))
+        self.assertTrue(hasattr(first_rule, 'business_impact'))
+        self.assertTrue(hasattr(first_rule, 'owner'))
+        self.assertTrue(hasattr(first_rule, 'execution_timeout_seconds'))
+        self.assertTrue(hasattr(first_rule, 'retry_count'))
+        
+        # Test enhanced rule with production metadata
+        enhanced_rule = None
+        for rule in staging_rules:
+            if rule.rule_id == "STG_001":
+                enhanced_rule = rule
+                break
+        
+        self.assertIsNotNone(enhanced_rule)
+        self.assertEqual(enhanced_rule.business_impact, "critical")
+        self.assertIn("critical", enhanced_rule.tags)
+        self.assertEqual(enhanced_rule.owner, "data_engineering_team")
+        self.assertEqual(enhanced_rule.execution_timeout_seconds, 30)
+    
+    def test_rule_business_impact_levels(self):
+        """Test that rules have appropriate business impact levels."""
+        all_rules = get_rules_for_table("stg_accounts_daily_snapshots")
+        
+        # Check business impact values are valid
+        valid_impacts = ["low", "medium", "high", "critical"]
+        for rule in all_rules:
+            self.assertIn(rule.business_impact, valid_impacts)
+        
+        # Critical rules should have high or critical business impact
+        critical_rules = [r for r in all_rules if r.severity == "error"]
+        for rule in critical_rules:
+            if hasattr(rule, 'business_impact'):
+                self.assertIn(rule.business_impact, ["high", "critical"])
+    
+    def test_rule_metadata_completeness(self):
+        """Test that production rules have complete metadata."""
+        staging_rules = get_rules_for_table("stg_accounts_daily_snapshots")
+        
+        for rule in staging_rules:
+            # All rules should have basic metadata
+            self.assertIsNotNone(rule.rule_id)
+            self.assertIsNotNone(rule.rule_name)
+            self.assertIsNotNone(rule.description)
+            self.assertIsNotNone(rule.table_name)
+            self.assertIsInstance(rule.enabled, bool)
+            
+            # Production metadata should be present
+            self.assertIsInstance(rule.tags, list)
+            self.assertGreater(rule.execution_timeout_seconds, 0)
+            self.assertGreaterEqual(rule.retry_count, 0)
+            
+            # Critical rules should have owners
+            if rule.severity == "error":
+                self.assertIsNotNone(rule.owner)
 
 
 if __name__ == '__main__':

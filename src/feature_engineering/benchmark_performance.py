@@ -460,27 +460,27 @@ class FeatureEngineeringBenchmark:
         if 'summary' in self.results:
             summary = self.results['summary']
             
-            print(f"\nBenchmark Configuration:")
+            print("\nBenchmark Configuration:")
             print(f"  Accounts: {summary['benchmark_config']['n_accounts']}")
             print(f"  Days: {summary['benchmark_config']['n_days']}")
             
             if 'computation_efficiency' in summary:
-                print(f"\nComputation Performance:")
+                print("\nComputation Performance:")
                 print(f"  Records/second: {summary['computation_efficiency']['records_per_second']:.2f}")
                 print(f"  Est. daily capacity: {summary['computation_efficiency']['estimated_daily_capacity']:,.0f} records")
             
             if 'memory_efficiency' in summary:
-                print(f"\nMemory Usage:")
+                print("\nMemory Usage:")
                 print(f"  MB per account: {summary['memory_efficiency']['mb_per_account']:.2f}")
                 print(f"  Est. 1K accounts: {summary['memory_efficiency']['estimated_1k_accounts_mb']:.0f} MB")
             
             if 'feature_quality_summary' in summary:
-                print(f"\nFeature Quality:")
+                print("\nFeature Quality:")
                 print(f"  Total features: {summary['feature_quality_summary']['total_features']}")
                 print(f"  Overall coverage: {summary['feature_quality_summary']['overall_coverage_pct']:.1f}%")
             
             if 'data_quality_summary' in summary:
-                print(f"\nData Quality:")
+                print("\nData Quality:")
                 quality = summary['data_quality_summary']
                 print(f"  Duplicates: {'Yes' if quality['has_duplicates'] else 'No'}")
                 print(f"  Alignment OK: {'Yes' if quality['alignment_ok'] else 'No'}")
