@@ -217,7 +217,7 @@ class AlertManager:
             blocks = self._format_slack_blocks(alert)
             
             # Send message
-            response = self.channels["slack"].chat_postMessage(
+            self.channels["slack"].chat_postMessage(
                 channel=self.config["slack"]["channel"],
                 text=f"{alert.severity.value.upper()}: {alert.title}",
                 blocks=blocks

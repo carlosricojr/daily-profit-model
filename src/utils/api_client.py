@@ -687,7 +687,7 @@ class RiskAnalyticsAPIClient:
         """
         try:
             # Simple health check using accounts endpoint
-            response = self._make_request('accounts', params={'limit': 1})
+            self._make_request('accounts', params={'limit': 1})
             logger.info("API health check passed")
             return True
         except Exception as e:

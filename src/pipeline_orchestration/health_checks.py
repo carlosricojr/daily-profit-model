@@ -320,12 +320,12 @@ class HealthChecker:
             start_time = time.time()
             
             # Test model database
-            model_result = self.db_manager.model_db.execute_query("SELECT 1 as test, current_timestamp as ts")
+            self.db_manager.model_db.execute_query("SELECT 1 as test, current_timestamp as ts")
             model_time = time.time() - start_time
             
             # Test source database
             start_time = time.time()
-            source_result = self.db_manager.source_db.execute_query("SELECT 1 as test, current_timestamp as ts")
+            self.db_manager.source_db.execute_query("SELECT 1 as test, current_timestamp as ts")
             source_time = time.time() - start_time
             
             # Check connection pool status

@@ -16,7 +16,7 @@ try:
     from prometheus_client import (
         Counter, Gauge, Histogram, Summary,
         CollectorRegistry, generate_latest,
-        push_to_gateway, REGISTRY
+        push_to_gateway
     )
     PROMETHEUS_AVAILABLE = True
 except ImportError:

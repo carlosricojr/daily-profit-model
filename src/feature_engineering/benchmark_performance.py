@@ -133,7 +133,7 @@ class FeatureEngineeringBenchmark:
         WHERE account_id = %s AND date >= %s AND date <= %s
         """
         
-        result = self.db_manager.model_db.execute_query(
+        self.db_manager.model_db.execute_query(
             query, (account['account_id'], start_date, end_date)
         )
         
@@ -511,7 +511,7 @@ def main():
     benchmark = FeatureEngineeringBenchmark()
     
     try:
-        results = benchmark.run_full_benchmark(
+        benchmark.run_full_benchmark(
             n_accounts=args.accounts,
             n_days=args.days
         )

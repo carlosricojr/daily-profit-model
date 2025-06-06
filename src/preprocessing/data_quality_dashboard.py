@@ -10,16 +10,16 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+logger = logging.getLogger(__name__)
+
 try:
     import dash
-    from dash import dcc, html, Input, Output, State
+    from dash import dcc, html, Input, Output
     import dash_bootstrap_components as dbc
     DASH_AVAILABLE = True
 except ImportError:
     DASH_AVAILABLE = False
     logger.warning("Dash not available. Dashboard features disabled.")
-
-logger = logging.getLogger(__name__)
 
 
 class DataQualityDashboard:

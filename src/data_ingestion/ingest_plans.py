@@ -320,8 +320,6 @@ class PlansIngester(BaseIngester):
         if enable_deduplication is not None:
             self.enable_deduplication = enable_deduplication
         
-        start_time = datetime.now()
-        
         try:
             # Log pipeline execution start
             self.log_pipeline_execution('running')

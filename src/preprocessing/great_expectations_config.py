@@ -109,7 +109,7 @@ class GreatExpectationsValidator:
         try:
             suite = self.context.get_expectation_suite(expectation_suite_name=suite_name)
             logger.info(f"Loaded existing expectation suite: {suite_name}")
-        except:
+        except Exception:
             suite = self.context.create_expectation_suite(
                 expectation_suite_name=suite_name,
                 overwrite_existing=True
@@ -238,7 +238,7 @@ class GreatExpectationsValidator:
         
         try:
             suite = self.context.get_expectation_suite(expectation_suite_name=suite_name)
-        except:
+        except Exception:
             suite = self.context.create_expectation_suite(
                 expectation_suite_name=suite_name,
                 overwrite_existing=True
@@ -283,7 +283,7 @@ class GreatExpectationsValidator:
         
         try:
             suite = self.context.get_expectation_suite(expectation_suite_name=suite_name)
-        except:
+        except Exception:
             suite = self.context.create_expectation_suite(
                 expectation_suite_name=suite_name,
                 overwrite_existing=True

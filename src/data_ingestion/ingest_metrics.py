@@ -293,8 +293,6 @@ class MetricsIngester(BaseIngester):
         self.checkpoint_manager = self.checkpoint_managers[metric_type]
         self.metrics = self.metrics_by_type[metric_type]
         
-        start_time = datetime.now()
-        
         try:
             # Log pipeline execution start
             self.log_pipeline_execution('running')
@@ -352,7 +350,6 @@ class MetricsIngester(BaseIngester):
         """Ingest all-time metrics data with checkpointing."""
         batch_data = []
         batch_size = 1000
-        total_records = self.metrics.total_records
         
         # Resume from checkpoint if available
         start_page = 0
@@ -465,7 +462,6 @@ class MetricsIngester(BaseIngester):
             if checkpoint and checkpoint.get('last_processed_date') == current_date.strftime('%Y-%m-%d'):
                 start_page = checkpoint.get('last_processed_page', 0) + 1
             
-            page_count = 0
             for page_num, metrics_page in enumerate(self.api_client.get_metrics(
                 metric_type=metric_type.value,
                 logins=logins,
@@ -512,8 +508,6 @@ class MetricsIngester(BaseIngester):
                     if len(batch_data) >= batch_size:
                         self._insert_batch(batch_data)
                         batch_data = []
-                
-                page_count = page_num
                 
                 # Save checkpoint after each page
                 if self.metrics.new_records % 5000 == 0:

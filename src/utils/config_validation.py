@@ -64,15 +64,15 @@ class ConfigValidator:
         
         # Type conversion
         try:
-            if field.type == bool:
+            if field.type is bool:
                 value = raw_value.lower() in ('true', '1', 'yes', 'on')
-            elif field.type == int:
+            elif field.type is int:
                 value = int(raw_value)
-            elif field.type == float:
+            elif field.type is float:
                 value = float(raw_value)
-            elif field.type == list:
+            elif field.type is list:
                 value = [item.strip() for item in raw_value.split(',')]
-            elif field.type == dict:
+            elif field.type is dict:
                 value = json.loads(raw_value)
             else:
                 value = raw_value

@@ -421,7 +421,6 @@ class AggressiveConfidenceEstimator(BaseConfidenceEstimator):
         
         for ec in expected_coverage:
             alpha = 1 - ec
-            lower_q = np.percentile(self.conformity_scores, alpha / 2 * 100)
             upper_q = np.percentile(self.conformity_scores, (1 - alpha / 2) * 100)
             
             lower_c = y_pred - upper_q

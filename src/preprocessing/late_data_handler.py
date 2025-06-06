@@ -4,8 +4,8 @@ Manages detection, processing, and backfilling of late data.
 """
 
 import logging
-from typing import Dict, List, Optional
-from datetime import datetime, date, timedelta
+from typing import Dict, List, Optional, Any
+from datetime import datetime, date
 from dataclasses import dataclass
 from enum import Enum
 
@@ -113,7 +113,6 @@ class LateDataHandler:
         GROUP BY account_id
         """
         
-        cutoff_time = datetime.now() - timedelta(hours=lookback_hours)
         params = (watermark['watermark_timestamp'], datetime.now(), check_date)
         
         late_accounts = self.db_manager.model_db.execute_query(query, params)
@@ -328,9 +327,6 @@ class LateDataHandler:
         self.db_manager.model_db.execute_command(delete_query, tuple(params))
         
         # Recreate snapshots with latest data
-        from preprocessing.create_staging_snapshots import StagingSnapshotCreator
-        creator = StagingSnapshotCreator()
-        
         # Use the existing snapshot creation logic but for specific accounts
         # This would need modification in the actual implementation
         for account_id in affected_accounts:

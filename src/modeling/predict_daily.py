@@ -505,7 +505,7 @@ class AdvancedDailyPredictor:
         
         try:
             result = self.db_manager.model_db.execute_query(query, params)
-        except:
+        except Exception:
             # Fallback to original registries
             if self.model_version:
                 query = """

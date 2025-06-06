@@ -57,7 +57,7 @@ class ModelVersionManager:
             
             models_df = self.db_manager.model_db.execute_query_df(query)
             
-        except:
+        except Exception:
             # Fallback to original registry
             query = """
             SELECT 
@@ -99,7 +99,7 @@ class ModelVersionManager:
             try:
                 check_query = "SELECT model_version FROM model_registry_enhanced WHERE model_version = %s"
                 result = self.db_manager.model_db.execute_query(check_query, (model_version,))
-            except:
+            except Exception:
                 pass
         
         if not result:
@@ -114,7 +114,7 @@ class ModelVersionManager:
                 try:
                     deactivate_query = "UPDATE model_registry_enhanced SET is_active = false"
                     self.db_manager.model_db.execute_command(deactivate_query)
-                except:
+                except Exception:
                     pass  # Enhanced registry might not exist
             
             # Activate target model
@@ -124,7 +124,7 @@ class ModelVersionManager:
             try:
                 activate_query = "UPDATE model_registry_enhanced SET is_active = true WHERE model_version = %s"
                 self.db_manager.model_db.execute_command(activate_query, (model_version,))
-            except:
+            except Exception:
                 pass
             
             # Log activation
@@ -153,7 +153,7 @@ class ModelVersionManager:
             try:
                 deactivate_query = "UPDATE model_registry_enhanced SET is_active = false WHERE model_version = %s"
                 self.db_manager.model_db.execute_command(deactivate_query, (model_version,))
-            except:
+            except Exception:
                 pass
             
             logger.info(f"Model '{model_version}' deactivated successfully")
@@ -195,7 +195,7 @@ class ModelVersionManager:
             
             comparison_df = self.db_manager.model_db.execute_query_df(query, tuple(model_versions))
             
-        except:
+        except Exception:
             # Fallback to original registry
             query = f"""
             SELECT 
@@ -333,7 +333,7 @@ class ModelVersionManager:
                     try:
                         delete_query = "DELETE FROM model_registry_enhanced WHERE model_version = %s"
                         self.db_manager.model_db.execute_command(delete_query, (model['model_version'],))
-                    except:
+                    except Exception:
                         pass
                     
                     cleanup_summary["removed_models"].append(model['model_version'])
@@ -363,7 +363,7 @@ class ModelVersionManager:
             
             if result:
                 return result[0]
-        except:
+        except Exception:
             pass
         
         # Fallback to original registry
@@ -391,7 +391,7 @@ class ModelVersionManager:
             try:
                 query = "SELECT * FROM model_registry_enhanced WHERE model_version = %s"
                 result = self.db_manager.model_db.execute_query(query, (model_version,))
-            except:
+            except Exception:
                 pass
         
         if not result:
@@ -441,12 +441,12 @@ class ModelVersionManager:
             
             # Load model
             if validation_results["artifacts_found"].get("model", False):
-                model = joblib.load(model_metadata['model_file_path'])
+                joblib.load(model_metadata['model_file_path'])
                 validation_results["artifacts_loadable"]["model"] = True
             
             # Load scaler
             if validation_results["artifacts_found"].get("scaler", False):
-                scaler = joblib.load(model_metadata['scaler_file_path'])
+                joblib.load(model_metadata['scaler_file_path'])
                 validation_results["artifacts_loadable"]["scaler"] = True
             
         except Exception as e:
@@ -531,7 +531,7 @@ def main():
     validate_parser.add_argument('model_version', help='Model version to validate')
     
     # Active model
-    active_parser = subparsers.add_parser('active', help='Show currently active model')
+    subparsers.add_parser('active', help='Show currently active model')
     
     parser.add_argument('--log-level', default='INFO',
                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'])

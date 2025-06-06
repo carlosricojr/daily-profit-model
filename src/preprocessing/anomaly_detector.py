@@ -280,7 +280,6 @@ class AnomalyDetector:
             
             # Check if group behavior is anomalous
             group_profit = group['net_profit'].sum()
-            group_win_rate = group['win_rate'].mean()
             
             # Compare with historical average for this balance range
             hist_query = """

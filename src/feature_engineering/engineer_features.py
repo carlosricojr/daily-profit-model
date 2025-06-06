@@ -935,7 +935,7 @@ class ProductionFeatureEngineer:
                     'average_score', 0.0
                 )
                 features['market_sentiment_score'] = sentiment_score
-            except:
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
                 features['market_sentiment_score'] = 0.0
             
             # Parse volatility regime and liquidity state
@@ -947,7 +947,7 @@ class ProductionFeatureEngineer:
                 key_metrics = summary.get('key_metrics', {})
                 features['market_volatility_regime'] = key_metrics.get('volatility_regime', 'normal')
                 features['market_liquidity_state'] = key_metrics.get('liquidity_state', 'normal')
-            except:
+            except (json.JSONDecodeError, KeyError, TypeError):
                 features['market_volatility_regime'] = 'normal'
                 features['market_liquidity_state'] = 'normal'
             
@@ -969,7 +969,7 @@ class ProductionFeatureEngineer:
                 
                 btc_data = instruments.get('data', {}).get('BTCUSD', {})
                 features['btc_volatility_90d'] = btc_data.get('volatility_90d', 0.5)
-            except:
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
                 features.update({
                     'vix_level': 15.0,
                     'dxy_level': 100.0,
@@ -984,7 +984,7 @@ class ProductionFeatureEngineer:
                 ) else regime_data['country_economic_indicators']
                 
                 features['fed_funds_rate'] = indicators.get('fed_funds_rate_effective', 5.0)
-            except:
+            except (json.JSONDecodeError, KeyError, TypeError):
                 features['fed_funds_rate'] = 5.0
         
         else:
@@ -1608,7 +1608,7 @@ class FeatureEngineer:
                     'average_score', 0.0
                 )
                 features['market_sentiment_score'] = sentiment_score
-            except:
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
                 features['market_sentiment_score'] = 0.0
             
             # Parse volatility regime and liquidity state
@@ -1620,7 +1620,7 @@ class FeatureEngineer:
                 key_metrics = summary.get('key_metrics', {})
                 features['market_volatility_regime'] = key_metrics.get('volatility_regime', 'normal')
                 features['market_liquidity_state'] = key_metrics.get('liquidity_state', 'normal')
-            except:
+            except (json.JSONDecodeError, KeyError, TypeError):
                 features['market_volatility_regime'] = 'normal'
                 features['market_liquidity_state'] = 'normal'
             
@@ -1642,7 +1642,7 @@ class FeatureEngineer:
                 
                 btc_data = instruments.get('data', {}).get('BTCUSD', {})
                 features['btc_volatility_90d'] = btc_data.get('volatility_90d', 0.5)
-            except:
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
                 features.update({
                     'vix_level': 15.0,
                     'dxy_level': 100.0,
@@ -1657,7 +1657,7 @@ class FeatureEngineer:
                 ) else regime_data['country_economic_indicators']
                 
                 features['fed_funds_rate'] = indicators.get('fed_funds_rate_effective', 5.0)
-            except:
+            except (json.JSONDecodeError, KeyError, TypeError):
                 features['fed_funds_rate'] = 5.0
         
         else:

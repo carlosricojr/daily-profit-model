@@ -271,7 +271,7 @@ def cleanup_old_data(**context) -> None:
     
     for query in cleanup_queries:
         try:
-            result = hook.run(query)
+            hook.run(query)
             logger.info("Cleanup query executed successfully")
         except Exception as e:
             logger.error(f"Cleanup query failed: {str(e)}")
