@@ -446,29 +446,144 @@ class RiskAnalyticsAPIClient:
             # Return session to pool
             self.connection_pool.return_session(session)
     
+    def _validate_response(self, response: Dict[str, Any]) -> bool:
+        """
+        Validate API response status.
+        
+        Args:
+            response: API response dictionary
+            
+        Returns:
+            True if response is valid
+            
+        Raises:
+            APIError: If response has error status
+        """
+        if not isinstance(response, dict):
+            return False
+            
+        status = response.get('Status', '').lower()
+        if status == 'ok':
+            return True
+        elif status in ('error', 'fail'):
+            error_msg = response.get('Error', response.get('Message', 'Unknown error'))
+            raise APIError(f"API error: {error_msg}")
+        else:
+            raise APIError(f"Unknown response status: {status}")
+            
+    def _extract_data_from_response(self, response: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Extract data from various API response structures.
+        
+        Handles:
+        - response['Data'] as a list (e.g., /accounts)
+        - response['Data']['data'] as a list (e.g., paginated endpoints)
+        - response['data'] as a list (legacy format)
+        
+        Args:
+            response: API response dictionary
+            
+        Returns:
+            List of data records
+        """
+        if not isinstance(response, dict):
+            logger.warning(f"Response is not a dict: {type(response)}")
+            return []
+            
+        # Check for 'Data' field (capital D)
+        if 'Data' in response:
+            data_field = response['Data']
+            
+            # If Data is a list, return it directly
+            if isinstance(data_field, list):
+                return data_field
+                
+            # If Data is a dict, look for nested 'data' field
+            elif isinstance(data_field, dict) and 'data' in data_field:
+                return data_field['data']
+                
+            # If Data is a dict without 'data', check if it's pagination metadata
+            elif isinstance(data_field, dict):
+                # Check if it looks like pagination metadata only
+                if all(key in data_field for key in ['total', 'skip', 'limit']) and 'data' not in data_field:
+                    logger.warning("Response contains only pagination metadata, no data")
+                    return []
+                # Otherwise, wrap single record in a list
+                return [data_field]
+                
+        # Check for lowercase 'data' field (legacy)
+        elif 'data' in response:
+            data_field = response['data']
+            if isinstance(data_field, list):
+                return data_field
+            elif data_field is not None:
+                return [data_field]
+                
+        logger.warning(f"Could not extract data from response structure: {list(response.keys())}")
+        return []
+        
+    def _extract_pagination_metadata(self, response: Dict[str, Any]) -> Dict[str, int]:
+        """
+        Extract pagination metadata from response.
+        
+        Args:
+            response: API response dictionary
+            
+        Returns:
+            Dictionary with total, skip, limit, count
+        """
+        metadata = {
+            'total': None,
+            'skip': 0,
+            'limit': None,
+            'count': 0
+        }
+        
+        if not isinstance(response, dict):
+            return metadata
+            
+        # Check if Data field contains pagination info
+        if 'Data' in response and isinstance(response['Data'], dict):
+            data_field = response['Data']
+            metadata['total'] = data_field.get('total')
+            metadata['skip'] = data_field.get('skip', 0)
+            metadata['limit'] = data_field.get('limit')
+            metadata['count'] = data_field.get('count', len(data_field.get('data', [])))
+            
+        return metadata
+    
     def paginate(self,
                 endpoint: str,
                 params: Optional[Dict[str, Any]] = None,
                 limit: int = 1000,
-                max_pages: Optional[int] = None) -> Iterator[List[Dict[str, Any]]]:
+                max_pages: Optional[int] = None,
+                include_total: bool = True) -> Iterator[List[Dict[str, Any]]]:
         """
-        Paginate through API results.
+        Enhanced pagination with intelligent termination.
         
         Args:
             endpoint: API endpoint path
             params: Query parameters
             limit: Number of results per page
             max_pages: Maximum number of pages to fetch (optional)
+            include_total: Whether to request total count metadata
             
         Yields:
             Lists of results from each page
         """
         if params is None:
             params = {}
-        
+            
         params['limit'] = limit
         params['skip'] = 0
+        
+        # Request total count if supported by endpoint
+        if include_total:
+            params['include-total'] = 1
+            
         page = 0
+        total_fetched = 0
+        total_expected = None
         
         while max_pages is None or page < max_pages:
             logger.info(f"Fetching page {page + 1}, skip={params['skip']}, limit={limit}")
@@ -476,33 +591,66 @@ class RiskAnalyticsAPIClient:
             try:
                 response = self._make_request(endpoint, params=params)
                 
-                # Handle different response formats
-                if isinstance(response, list):
-                    results = response
-                elif isinstance(response, dict) and 'data' in response:
-                    results = response['data']
-                else:
-                    logger.warning(f"Unexpected response format: {type(response)}")
-                    results = []
+                # Validate response status
+                self._validate_response(response)
+                
+                # Extract data from response
+                results = self._extract_data_from_response(response)
+                
+                # Extract pagination metadata
+                metadata = self._extract_pagination_metadata(response)
+                
+                # Update total if available
+                if metadata['total'] is not None and total_expected is None:
+                    total_expected = metadata['total']
+                    logger.info(f"Total records available: {total_expected}")
+                    
+                # Track progress
+                result_count = len(results)
+                total_fetched += result_count
+                
+                logger.debug(f"Page {page + 1}: fetched {result_count} records, total so far: {total_fetched}")
                 
                 if not results:
-                    logger.info("No more results, stopping pagination")
+                    logger.info("No results returned, stopping pagination")
                     break
-                
+                    
                 yield results
                 
-                # Check if we got fewer results than limit (last page)
-                if len(results) < limit:
-                    logger.info(f"Last page reached (got {len(results)} results)")
-                    break
+                # Intelligent termination conditions
                 
+                # 1. If we know the total and have fetched everything
+                if total_expected is not None:
+                    if total_fetched >= total_expected:
+                        logger.info(f"Fetched all {total_expected} records")
+                        break
+                        
+                    # Also check skip + count >= total (server-side indication)
+                    if metadata['skip'] + metadata['count'] >= total_expected:
+                        logger.info(f"Server indicates all data fetched (skip={metadata['skip']}, count={metadata['count']}, total={total_expected})")
+                        break
+                        
+                # 2. If we got fewer results than requested (traditional last page check)
+                if result_count < limit:
+                    logger.info(f"Last page reached (got {result_count} results, expected {limit})")
+                    break
+                    
+                # 3. If the server explicitly returns count=0
+                if metadata['count'] == 0:
+                    logger.info("Server returned count=0, no more data")
+                    break
+                    
                 # Update pagination parameters
                 params['skip'] += limit
                 page += 1
                 
-                # Small delay between pages
+                # Small delay between pages to be nice to the API
                 time.sleep(0.1)
                 
+            except APIError as e:
+                # API errors (including validation errors) should stop pagination
+                logger.error(f"API error during pagination: {str(e)}")
+                break
             except (APIClientError, APIServerError) as e:
                 logger.error(f"Error during pagination: {str(e)}")
                 # For client errors, stop pagination immediately
@@ -514,6 +662,8 @@ class RiskAnalyticsAPIClient:
             except Exception as e:
                 logger.error(f"Unexpected error during pagination: {str(e)}")
                 break
+                
+        logger.info(f"Pagination complete. Fetched {total_fetched} records in {page} pages")
     
     def get_accounts(self, 
                     logins: Optional[List[str]] = None,
@@ -538,7 +688,8 @@ class RiskAnalyticsAPIClient:
         params.update(kwargs)
         
         # Max limit for accounts endpoint is 500
-        yield from self.paginate('accounts', params=params, limit=500)
+        # Accounts endpoint doesn't support include-total
+        yield from self.paginate('accounts', params=params, limit=500, include_total=False)
     
     def get_metrics(self,
                    metric_type: str,
@@ -575,7 +726,8 @@ class RiskAnalyticsAPIClient:
         params.update(kwargs)
         
         # Max limit for metrics endpoints is 1000
-        yield from self.paginate(endpoint, params=params, limit=1000)
+        # Metrics endpoints support include-total
+        yield from self.paginate(endpoint, params=params, limit=1000, include_total=True)
     
     def get_trades(self,
                   trade_type: str,
@@ -628,7 +780,8 @@ class RiskAnalyticsAPIClient:
         params.update(kwargs)
         
         # Max limit for trades endpoints is 1000
-        yield from self.paginate(endpoint, params=params, limit=1000)
+        # Trades endpoints support include-total
+        yield from self.paginate(endpoint, params=params, limit=1000, include_total=True)
     
     def format_date(self, date: datetime) -> str:
         """Format date for API in YYYYMMDD format."""
