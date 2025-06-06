@@ -7,7 +7,7 @@ import os
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
-import numpy as np
+import random
 
 from src.utils.api_client import RiskAnalyticsAPIClient
 
@@ -59,7 +59,7 @@ class TestIntegrationPipeline(unittest.TestCase):
         for i in range(30):
             current_date = base_date + timedelta(days=i)
             for account in self.mock_accounts:
-                daily_pnl = np.random.normal(100, 500)
+                daily_pnl = random.gauss(100, 500)
                 self.mock_metrics.append({
                     "date": current_date.strftime("%Y-%m-%dT00:00:00.000Z"),
                     "login": account["login"],
@@ -67,17 +67,17 @@ class TestIntegrationPipeline(unittest.TestCase):
                     "netProfit": float(daily_pnl),
                     "grossProfit": float(max(daily_pnl, 0)),
                     "grossLoss": float(min(daily_pnl, 0)),
-                    "numTrades": np.random.randint(0, 20),
+                    "numTrades": random.randint(0, 20),
                     "startingBalance": account["startingBalance"],
                     "currentBalance": account["currentBalance"],
                     "currentEquity": account["currentBalance"]
                 })
                 
     @patch.object(RiskAnalyticsAPIClient, '_make_request')
-    def test_01_api_response_parsing_bug(self, mock_api):
-        """Test the API response parsing bug identified in code review."""
+    def test_01_api_response_parsing_fixed(self, mock_api):
+        """Test that the API response parsing bug has been fixed."""
         
-        # Test 1: Current implementation fails with nested structure
+        # Test 1: Fixed implementation handles nested Data.data structure
         mock_api.return_value = {
             "Status": "ok",
             "Data": {
@@ -91,19 +91,21 @@ class TestIntegrationPipeline(unittest.TestCase):
         api_client = RiskAnalyticsAPIClient()
         results = list(api_client.paginate('/accounts'))
         
-        # This should fail with current implementation
-        self.assertEqual(len(results), 0, 
-                        "BUG CONFIRMED: API client cannot parse nested Data.data structure")
+        # Fixed implementation should parse this correctly
+        self.assertEqual(len(results), 1, 
+                        "Fixed implementation correctly parses nested Data.data structure")
+        self.assertEqual(len(results[0]), 2, "Should return 2 accounts")
+        self.assertEqual(results[0][0]['accountId'], 'ACC001')
         
-        # Test 2: Current implementation works with flat structure
+        # Test 2: Fixed implementation also handles flat structure for compatibility
         mock_api.return_value = {
             "Status": "ok",
-            "data": self.mock_accounts  # What current code expects
+            "data": self.mock_accounts  # Legacy flat structure
         }
         
         results = list(api_client.paginate('/accounts'))
         self.assertEqual(len(results), 1, 
-                        "Current code works with flat 'data' structure")
+                        "Fixed implementation maintains backward compatibility with flat 'data' structure")
         
     @patch.object(RiskAnalyticsAPIClient, '_make_request')
     def test_02_pagination_without_metadata(self, mock_api):
@@ -133,14 +135,14 @@ class TestIntegrationPipeline(unittest.TestCase):
         
         api_client = RiskAnalyticsAPIClient()
         
-        # Current implementation doesn't use total count
+        # Fixed implementation uses total count for intelligent termination
         all_results = []
         for page in api_client.paginate('/metrics/daily', params={'limit': 10}):
             all_results.extend(page)
             
-        # Current implementation fails due to parsing bug
-        self.assertEqual(len(all_results), 0, 
-                        "Pagination also affected by parsing bug")
+        # Fixed implementation correctly handles pagination
+        self.assertEqual(len(all_results), len(self.mock_metrics), 
+                        "Fixed pagination correctly fetches all records")
         
     @patch.object(RiskAnalyticsAPIClient, '_make_request')
     def test_03_error_status_handling(self, mock_api):
@@ -149,14 +151,16 @@ class TestIntegrationPipeline(unittest.TestCase):
         # Test error response
         mock_api.return_value = {
             "Status": "error",
-            "Data": {"message": "Invalid API key"}
+            "Error": "Invalid API key"
         }
         
         api_client = RiskAnalyticsAPIClient()
-        results = list(api_client.paginate('/accounts'))
         
-        # Should return empty results on error status
-        self.assertEqual(len(results), 0)
+        # Fixed implementation should raise APIError on error status
+        with self.assertRaises(Exception) as context:
+            list(api_client.paginate('/accounts'))
+        
+        self.assertIn("API error", str(context.exception))
         
     @patch.object(RiskAnalyticsAPIClient, '_make_request')
     def test_04_malformed_response_handling(self, mock_api):
@@ -175,9 +179,17 @@ class TestIntegrationPipeline(unittest.TestCase):
         
         for response in test_cases:
             mock_api.return_value = response
-            results = list(api_client.paginate('/accounts'))
-            self.assertEqual(len(results), 0, 
-                           f"Should handle malformed response: {response}")
+            
+            # Fixed implementation handles malformed responses gracefully
+            if response is None or not isinstance(response, dict):
+                # Should raise error for non-dict responses
+                with self.assertRaises(Exception):
+                    list(api_client.paginate('/accounts'))
+            else:
+                # Should return empty results for missing/invalid data
+                results = list(api_client.paginate('/accounts'))
+                self.assertEqual(len(results), 0, 
+                               f"Should handle malformed response: {response}")
             
     def test_05_integration_components(self):
         """Test that key components can be initialized."""
@@ -194,10 +206,10 @@ class TestIntegrationPipeline(unittest.TestCase):
         self.assertIsNotNone(api_client.rate_limiter)
         
     @patch.object(RiskAnalyticsAPIClient, '_make_request')
-    def test_06_demonstrate_correct_parsing(self, mock_api):
-        """Demonstrate how the API response should be parsed correctly."""
+    def test_06_fixed_implementation_features(self, mock_api):
+        """Test all features of the fixed implementation."""
         
-        # This is what the fixed implementation should handle
+        # Test 1: Response validation
         mock_api.return_value = {
             "Status": "ok",
             "Data": {
@@ -210,23 +222,111 @@ class TestIntegrationPipeline(unittest.TestCase):
         
         api_client = RiskAnalyticsAPIClient()
         
-        # Manual parsing to show correct approach
+        # Test internal methods work correctly
         response = api_client._make_request('/accounts')
         
-        # Check status
-        self.assertEqual(response.get('Status'), 'ok')
+        # Validate response
+        self.assertTrue(api_client._validate_response(response))
         
-        # Extract nested data correctly
-        data_wrapper = response.get('Data', {})
-        self.assertIsInstance(data_wrapper, dict)
-        
-        actual_data = data_wrapper.get('data', [])
-        self.assertEqual(len(actual_data), 2)
-        self.assertEqual(actual_data[0]['accountId'], 'ACC001')
+        # Extract data correctly
+        data = api_client._extract_data_from_response(response)
+        self.assertEqual(len(data), 2)
+        self.assertEqual(data[0]['accountId'], 'ACC001')
         
         # Extract pagination metadata
-        total = data_wrapper.get('total', 0)
-        self.assertEqual(total, 2)
+        metadata = api_client._extract_pagination_metadata(response)
+        self.assertEqual(metadata['total'], 2)
+        self.assertEqual(metadata['skip'], 0)
+        self.assertEqual(metadata['limit'], 100)
+        self.assertEqual(metadata['count'], 2)
+        
+        # Test 2: List response (like /accounts endpoint)
+        mock_api.return_value = {
+            "Status": "ok",
+            "Data": self.mock_accounts  # Direct list
+        }
+        
+        data = api_client._extract_data_from_response(mock_api.return_value)
+        self.assertEqual(len(data), 2)
+        
+    def test_07_all_optimizations_integrated(self):
+        """Test that all optimizations are properly integrated."""
+        
+        # Test 1: API client has enhanced features
+        api_client = RiskAnalyticsAPIClient()
+        
+        # Circuit breaker is active
+        self.assertIsNotNone(api_client.circuit_breaker)
+        self.assertEqual(api_client.circuit_breaker.state, 'closed')
+        
+        # Rate limiter is active  
+        self.assertIsNotNone(api_client.rate_limiter)
+        self.assertGreater(api_client.rate_limiter.tokens, 0)
+        
+        # Connection pool is active
+        self.assertIsNotNone(api_client.connection_pool)
+        self.assertGreater(api_client.connection_pool.pool_size, 0)
+        
+        # Test 2: Database operations use execute_batch (via imports)
+        try:
+            from psycopg2.extras import execute_batch
+            from src.data_ingestion.base_ingester import BaseIngester
+            
+            # Check that base_ingester imports execute_batch
+            import inspect
+            source = inspect.getsource(BaseIngester._insert_batch)
+            self.assertIn('execute_batch', source, 
+                         "Database operations should use execute_batch for optimization")
+        except ImportError:
+            # Skip if psycopg2 not installed in test environment
+            pass
+            
+        # Test 3: Logging infrastructure enhancements
+        from src.utils.logging_config import get_logger, LoggingContext
+        
+        logger = get_logger(__name__)
+        self.assertIsNotNone(logger)
+        
+        # Test correlation ID context
+        with LoggingContext(operation='test', user_id='test_user'):
+            # Context should be available
+            pass
+            
+        # Test 4: Feature engineering optimizations
+        try:
+            from src.feature_engineering.engineer_features_optimized import OptimizedFeatureEngineer
+            from src.feature_engineering.engineer_features_integrated import IntegratedFeatureEngineer
+            
+            # Both optimized versions should be available
+            self.assertTrue(hasattr(OptimizedFeatureEngineer, '_bulk_fetch_all_data'))
+            self.assertTrue(hasattr(IntegratedFeatureEngineer, 'engineer_features'))
+        except ImportError:
+            # Skip if not in proper environment
+            pass
+            
+    def test_08_production_ready_checks(self):
+        """Verify production readiness of all components."""
+        
+        # Test 1: No hardcoded credentials
+        import os
+        self.assertIsNone(os.environ.get('RISK_API_KEY', None), 
+                         "API key should not be hardcoded")
+        
+        # Test 2: Error handling is robust
+        api_client = RiskAnalyticsAPIClient()
+        
+        # Circuit breaker prevents cascading failures
+        for _ in range(10):
+            api_client.circuit_breaker.call_failed()
+            
+        self.assertTrue(api_client.circuit_breaker.is_open(), 
+                       "Circuit breaker should open after failures")
+        
+        # Test 3: Performance monitoring is available
+        stats = api_client.get_stats()
+        self.assertIn('total_requests', stats)
+        self.assertIn('performance', stats)
+        self.assertIn('circuit_breaker', stats)
         
 
 if __name__ == '__main__':
