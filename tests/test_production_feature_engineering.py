@@ -181,9 +181,9 @@ class TestFeatureQualityMonitor:
         assert coverage_results['feature_d']['coverage_rate'] == 0.0  # 0%
         
         # Validate adequacy assessments (assuming 95% threshold)
-        assert coverage_results['feature_c']['is_adequate'] == True
-        assert coverage_results['feature_b']['is_adequate'] == False
-        assert coverage_results['feature_d']['is_adequate'] == False
+        assert coverage_results['feature_c']['is_adequate']
+        assert not coverage_results['feature_b']['is_adequate']
+        assert not coverage_results['feature_d']['is_adequate']
     
     def test_feature_range_validation(self):
         """Test feature range validation with edge cases."""
@@ -210,9 +210,9 @@ class TestFeatureQualityMonitor:
         assert abs(range_results['ratio_feature']['out_of_range_percentage'] - 33.33) < 0.1
         
         # Validate adequacy (5% threshold)
-        assert range_results['count_feature']['is_valid'] == True
-        assert range_results['percentage_feature']['is_valid'] == False
-        assert range_results['ratio_feature']['is_valid'] == False
+        assert range_results['count_feature']['is_valid']
+        assert not range_results['percentage_feature']['is_valid']
+        assert not range_results['ratio_feature']['is_valid']
     
     def test_feature_drift_detection(self):
         """Test feature drift detection with statistical rigor."""
@@ -237,7 +237,7 @@ class TestFeatureQualityMonitor:
             'test_feature'
         )
         
-        assert drift_result['drift_detected'] == True
+        assert drift_result['drift_detected']
         assert drift_result['ks_statistic'] > 0
         assert drift_result['p_value'] < 0.05
         assert drift_result['mean_shift_pct'] > 10  # Should detect significant mean shift
@@ -249,7 +249,7 @@ class TestFeatureQualityMonitor:
             'test_feature'
         )
         
-        assert no_drift_result['drift_detected'] == False
+        assert not no_drift_result['drift_detected']
         assert no_drift_result['p_value'] > 0.05
         assert no_drift_result['mean_shift_pct'] < 5  # Should be minimal shift
     
@@ -319,13 +319,10 @@ class TestProductionFeatureEngineer:
     
     def test_memory_manager_context(self):
         """Test memory management context manager."""
-        initial_memory = 0
-        peak_memory = 0
         
         with self.engineer.memory_manager():
             # Simulate memory usage
-            large_data = [i for i in range(100000)]
-            peak_memory = len(large_data)
+            [i for i in range(100000)]
         
         # Memory manager should track peak usage
         assert self.engineer.performance_metrics['memory_peak_mb'] >= 0
@@ -389,7 +386,6 @@ class TestProductionFeatureEngineer:
             }
             
             # Simulate processing
-            start_time = datetime.now()
             
             # Mock feature engineering process
             result = engineer.engineer_features_with_validation(
@@ -414,7 +410,7 @@ class TestProductionFeatureEngineer:
         """Test error handling and recovery mechanisms."""
         # Test with invalid date range
         try:
-            result = self.engineer.engineer_features_with_validation(
+            self.engineer.engineer_features_with_validation(
                 start_date=date(2024, 1, 15),
                 end_date=date(2024, 1, 10),  # Invalid: start > end
                 validate_bias=True
@@ -573,14 +569,14 @@ class TestProductionReadiness:
                 
                 engineer = ProductionFeatureEngineer()
                 
-                result = engineer.engineer_features_with_validation(
+                engineer.engineer_features_with_validation(
                     start_date=date(2024, 1, 10),
                     end_date=date(2024, 1, 10),
                     validate_bias=True
                 )
             
             # Should have logged important events
-            log_output = log_capture.getvalue()
+            log_capture.getvalue()
             # Note: In actual implementation, we'd verify specific log messages
             
         finally:

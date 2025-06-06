@@ -164,7 +164,7 @@ class TestAccountsIngester(unittest.TestCase):
         self.mock_model_db.get_connection.return_value = mock_conn
         
         # Run ingestion with resume
-        result = self.ingester.ingest_accounts(resume_from_checkpoint=True)
+        self.ingester.ingest_accounts(resume_from_checkpoint=True)
         
         # Should have loaded checkpoint
         self.assertEqual(self.ingester.metrics.total_records, 150)
@@ -263,7 +263,7 @@ class TestAccountsIngester(unittest.TestCase):
         self.mock_model_db.get_connection.return_value = mock_conn
         
         # Run ingestion with deduplication
-        result = self.ingester.ingest_accounts(enable_deduplication=True)
+        self.ingester.ingest_accounts(enable_deduplication=True)
         
         # Check metrics
         self.assertEqual(self.ingester.metrics.total_records, 3)
@@ -292,7 +292,7 @@ class TestAccountsIngester(unittest.TestCase):
         self.mock_model_db.get_connection.return_value = mock_conn
         
         # Run ingestion with validation
-        result = self.ingester.ingest_accounts(enable_validation=True)
+        self.ingester.ingest_accounts(enable_validation=True)
         
         # Check metrics
         self.assertEqual(self.ingester.metrics.total_records, 4)

@@ -123,7 +123,7 @@ class TestPlansIngester(unittest.TestCase):
             'Profit Split %': 80.0
         }]
         
-        csv_path = self.create_test_csv('test_plans.csv', data)
+        self.create_test_csv('test_plans.csv', data)
         
         # Mock database operations
         mock_conn = MagicMock()

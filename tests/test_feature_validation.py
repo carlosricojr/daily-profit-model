@@ -451,11 +451,10 @@ class TestProductionFeatureEngineer(unittest.TestCase):
     
     def test_memory_manager_context(self):
         """Test memory management context manager."""
-        initial_metrics = self.engineer.performance_metrics.copy()
         
         with self.engineer.memory_manager():
             # Should execute without errors
-            test_data = list(range(1000))  # Create some memory usage
+            list(range(1000))  # Create some memory usage
         
         # Memory manager should track peak usage
         self.assertGreaterEqual(self.engineer.performance_metrics['memory_peak_mb'], 0)

@@ -54,7 +54,7 @@ class TestLoggingConfig(unittest.TestCase):
             # Clear handlers to avoid accumulation
             logging.getLogger().handlers.clear()
             
-            logger = setup_logging(log_level=level)
+            setup_logging(log_level=level)
             # Check the root logger level since setup_logging configures the root logger
             self.assertEqual(logging.getLogger().level, getattr(logging, level))
 
@@ -399,10 +399,8 @@ class TestAPIClientEnhancements(unittest.TestCase):
         client = RiskAnalyticsAPIClient(requests_per_second=5)
         
         # Make rapid requests
-        start_time = time.time()
         for _ in range(3):
             client._make_request("test_endpoint")
-        elapsed = time.time() - start_time
         
         # With burst capability, requests may go through immediately
         # Just verify that requests were made

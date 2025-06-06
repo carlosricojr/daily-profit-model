@@ -215,7 +215,7 @@ class TestRegimesIngester(unittest.TestCase):
         mock_cursor.fetchmany.side_effect = [[], []]  # No new data
         
         # Run ingestion with resume
-        result = self.ingester.ingest_regimes(
+        self.ingester.ingest_regimes(
             start_date=date(2024, 1, 1),
             end_date=date(2024, 1, 15),
             resume_from_checkpoint=True
@@ -246,7 +246,7 @@ class TestRegimesIngester(unittest.TestCase):
         mock_cursor.fetchmany.return_value = []
         
         # Run incremental ingestion
-        result = self.ingester.ingest_regimes(incremental=True)
+        self.ingester.ingest_regimes(incremental=True)
         
         # Should query from latest date + 1
         query_args = mock_cursor.execute.call_args
@@ -302,7 +302,7 @@ class TestRegimesIngester(unittest.TestCase):
         mock_cursor.fetchmany.side_effect = [mock_data, []]
         
         # Run ingestion with deduplication
-        result = self.ingester.ingest_regimes(
+        self.ingester.ingest_regimes(
             start_date=date(2024, 1, 15),
             end_date=date(2024, 1, 16),
             enable_deduplication=True

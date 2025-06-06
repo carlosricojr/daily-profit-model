@@ -272,7 +272,7 @@ class TestMetricsIngester(unittest.TestCase):
         self.mock_model_db.get_connection.return_value = mock_conn
         
         # Run ingestion
-        result = self.ingester.ingest_metrics(
+        self.ingester.ingest_metrics(
             metric_type='alltime',
             enable_validation=True
         )
@@ -380,7 +380,7 @@ class TestMetricsIngester(unittest.TestCase):
         self.mock_model_db.get_connection.return_value = mock_conn
         
         # Run ingestion with deduplication
-        result = self.ingester.ingest_metrics(
+        self.ingester.ingest_metrics(
             metric_type='alltime',
             enable_deduplication=True
         )

@@ -300,7 +300,7 @@ class TestEnhancedValidationFeatures(unittest.TestCase):
         
         # Run validation
         from datetime import date
-        results = self.validator.validate_staging_snapshot(date(2024, 1, 15))
+        self.validator.validate_staging_snapshot(date(2024, 1, 15))
         
         # Check metrics are tracked
         self.assertGreater(self.validator.validation_metrics['total_checks'], 0)
@@ -344,7 +344,7 @@ class TestEnhancedValidationFeatures(unittest.TestCase):
         ]
         
         from datetime import date
-        results = self.validator.validate_staging_snapshot(date(2024, 1, 15))
+        self.validator.validate_staging_snapshot(date(2024, 1, 15))
         
         # Verify structured metrics are available
         self.assertIn('total_checks', self.validator.validation_metrics)
