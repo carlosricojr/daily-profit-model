@@ -5,7 +5,6 @@ Handles the large volume of closed trades (81M records) efficiently.
 
 import os
 import sys
-import logging
 import json
 from datetime import datetime, timedelta, date
 from typing import List, Dict, Any, Optional, Tuple
@@ -19,9 +18,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.database import get_db_manager
 from utils.api_client import RiskAnalyticsAPIClient
-from utils.logging_config import setup_logging
+from utils.logging_config import (setup_logging, get_logger)
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -60,7 +59,7 @@ class CheckpointManager:
         checkpoint_file = self.checkpoint_dir / f"{stage}_checkpoint.json"
         with open(checkpoint_file, 'w') as f:
             json.dump(data, f, indent=2, default=str)
-        logger.debug(f"Checkpoint saved for {stage}")
+        logger.debug("Checkpoint saved", stage=stage, data_keys=list(data.keys()))
     
     def load_checkpoint(self, stage: str) -> Optional[Dict[str, Any]]:
         """Load checkpoint if exists."""
@@ -75,7 +74,7 @@ class CheckpointManager:
         checkpoint_file = self.checkpoint_dir / f"{stage}_checkpoint.json"
         if checkpoint_file.exists():
             checkpoint_file.unlink()
-            logger.debug(f"Checkpoint cleared for {stage}")
+            logger.debug("Checkpoint cleared", stage=stage)
 
 
 class TradesIngester:
@@ -139,7 +138,10 @@ class TradesIngester:
             if resume_from_checkpoint and not force_full_refresh:
                 checkpoint = self.checkpoint_manager.load_checkpoint(f"trades_{trade_type}")
                 if checkpoint:
-                    logger.info(f"Resuming from checkpoint: {checkpoint.get('last_processed_date')}")
+                    logger.info("Resuming from checkpoint", 
+                              last_processed_date=checkpoint.get('last_processed_date'),
+                              total_records=checkpoint.get('total_records', 0),
+                              new_records=checkpoint.get('new_records', 0))
                     if checkpoint.get('last_processed_date'):
                         # Resume from day after last processed
                         start_date = datetime.strptime(

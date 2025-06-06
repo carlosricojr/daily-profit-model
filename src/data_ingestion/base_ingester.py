@@ -13,7 +13,10 @@ from collections import defaultdict
 import tempfile
 
 from ..utils.database import get_db_manager
-from ..utils.logging_config import get_logger
+from ..utils.logging_config import (
+    get_logger, set_request_context,
+    log_metrics, get_correlation_id
+)
 
 logger = get_logger(__name__)
 
@@ -76,9 +79,9 @@ class CheckpointManager:
             with open(self.checkpoint_file, 'w') as f:
                 json.dump(checkpoint_data, f, indent=2)
             
-            logger.debug(f"Checkpoint saved: {checkpoint_data}")
+            logger.debug("Checkpoint saved", checkpoint_data=checkpoint_data)
         except Exception as e:
-            logger.error(f"Failed to save checkpoint: {str(e)}")
+            logger.error("Failed to save checkpoint", error=str(e), exc_info=True)
     
     def load_checkpoint(self) -> Optional[Dict[str, Any]]:
         """Load checkpoint from file."""
@@ -89,13 +92,14 @@ class CheckpointManager:
                 
                 # Verify checkpoint is for correct ingestion type
                 if checkpoint.get('ingestion_type') == self.ingestion_type:
-                    logger.info(f"Loaded checkpoint from {checkpoint.get('timestamp')}")
+                    logger.info("Loaded checkpoint", checkpoint_timestamp=checkpoint.get('timestamp'), ingestion_type=self.ingestion_type)
                     return checkpoint
                 else:
-                    logger.warning(f"Checkpoint type mismatch: expected {self.ingestion_type}, "
-                                 f"got {checkpoint.get('ingestion_type')}")
+                    logger.warning("Checkpoint type mismatch", 
+                                 expected_type=self.ingestion_type,
+                                 found_type=checkpoint.get('ingestion_type'))
         except Exception as e:
-            logger.error(f"Failed to load checkpoint: {str(e)}")
+            logger.error("Failed to load checkpoint", error=str(e), exc_info=True)
         
         return None
     
@@ -104,9 +108,9 @@ class CheckpointManager:
         try:
             if self.checkpoint_file.exists():
                 self.checkpoint_file.unlink()
-                logger.info("Checkpoint cleared")
+                logger.info("Checkpoint cleared", ingestion_type=self.ingestion_type)
         except Exception as e:
-            logger.error(f"Failed to clear checkpoint: {str(e)}")
+            logger.error("Failed to clear checkpoint", error=str(e), exc_info=True)
 
 
 class BaseIngester:
@@ -150,7 +154,17 @@ class BaseIngester:
         self.seen_records = set()
         self.max_cache_size = 100000  # Limit cache size
         
-        logger.info(f"Initialized {ingestion_type} ingester for table {table_name}")
+        # Set up logging context for this ingester
+        set_request_context(
+            ingestion_type=ingestion_type,
+            table_name=table_name
+        )
+        
+        logger.info("Initialized ingester", 
+                   ingestion_type=ingestion_type, 
+                   table_name=table_name,
+                   validation_enabled=enable_validation,
+                   deduplication_enabled=enable_deduplication)
     
     def _safe_float(self, value: Any) -> Optional[float]:
         """Safely convert value to float."""
@@ -160,7 +174,7 @@ class BaseIngester:
         try:
             return float(value)
         except (ValueError, TypeError):
-            logger.debug(f"Could not convert '{value}' to float")
+            logger.debug("Float conversion failed", value=value, value_type=type(value).__name__)
             return None
     
     def _safe_int(self, value: Any) -> Optional[int]:
@@ -171,7 +185,7 @@ class BaseIngester:
         try:
             return int(value)
         except (ValueError, TypeError):
-            logger.debug(f"Could not convert '{value}' to int")
+            logger.debug("Integer conversion failed", value=value, value_type=type(value).__name__)
             return None
     
     def _validate_record(self, record: Dict[str, Any]) -> Tuple[bool, List[str]]:
@@ -220,7 +234,10 @@ class BaseIngester:
                 self.metrics.invalid_records += 1
                 for error in errors:
                     self.metrics.validation_errors[error] += 1
-                logger.debug(f"Invalid record: {errors}")
+                logger.debug("Invalid record", 
+                           validation_errors=errors, 
+                           error_count=len(errors),
+                           record_sample=str(raw_record)[:200])
                 return None
         
         # Check for duplicates if enabled
@@ -298,11 +315,17 @@ class BaseIngester:
                     with conn.cursor() as cursor:
                         cursor.executemany(query, values)
             
-            logger.debug(f"Inserted batch of {len(batch_data)} records into {table_name}")
+            logger.debug("Batch inserted", 
+                       batch_size=len(batch_data), 
+                       table_name=table_name)
             
         except Exception as e:
             self.metrics.db_errors += 1
-            logger.error(f"Failed to insert batch: {str(e)}")
+            logger.error("Failed to insert batch", 
+                       error=str(e), 
+                       batch_size=len(batch_data),
+                       table_name=table_name,
+                       exc_info=True)
             raise
     
     def _get_conflict_clause(self, table_name: str) -> str:
@@ -330,7 +353,10 @@ class BaseIngester:
                 execution_details=self.metrics.to_dict()
             )
         except Exception as e:
-            logger.error(f"Failed to log pipeline execution: {str(e)}")
+            logger.error("Failed to log pipeline execution", 
+                       error=str(e),
+                       pipeline_stage=f'ingest_{self.ingestion_type}',
+                       exc_info=True)
     
     def get_metrics_summary(self) -> str:
         """Get a summary of ingestion metrics."""
@@ -346,6 +372,31 @@ class BaseIngester:
             f"  Processing time: {self.metrics.processing_time:.2f}s\n"
             f"  Rate: {self.metrics.records_per_second:.2f} records/s"
         )
+    
+    def log_ingestion_metrics(self):
+        """Log ingestion metrics in structured format."""
+        metrics_dict = self.metrics.to_dict()
+        
+        # Add additional context
+        metrics_dict['ingestion_type'] = self.ingestion_type
+        metrics_dict['table_name'] = self.table_name
+        metrics_dict['correlation_id'] = get_correlation_id()
+        
+        # Log metrics
+        log_metrics(
+            logger=logger,
+            operation=f"ingestion_{self.ingestion_type}",
+            metrics=metrics_dict,
+            status='completed'
+        )
+        
+        # Also log a human-readable summary
+        logger.info("Ingestion completed", 
+                   summary=self.get_metrics_summary(),
+                   total_records=self.metrics.total_records,
+                   new_records=self.metrics.new_records,
+                   processing_time_seconds=self.metrics.processing_time,
+                   records_per_second=self.metrics.records_per_second)
     
     def ingest(self, **kwargs) -> int:
         """
