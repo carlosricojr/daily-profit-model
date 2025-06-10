@@ -211,3 +211,10 @@ repomix-output.txt
 
 # Ignore logs
 logs/
+
+# Ignore src/checkpoints
+src/checkpoints/
+
+# Ignore src/db_schema/auto_migrations & archive
+src/db_schema/auto_migrations/
+src/db_schema/archive/

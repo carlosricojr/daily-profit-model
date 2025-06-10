@@ -336,6 +336,7 @@ class MetricsIngesterV2(BaseIngester):
             'averageLoss': 'average_loss',
             'averageRRR': 'average_rrr',
             'totalTrades': 'total_trades',
+            'numTrades': 'total_trades',  # Alternative field name
             'winningTrades': 'winning_trades',
             'losingTrades': 'losing_trades',
             'winRate': 'win_rate',
@@ -576,11 +577,334 @@ class MetricsIngesterV2(BaseIngester):
             return None  # Too large to fit
         return val
 
-    # The rest of the methods remain the same as in the original MetricsIngester
-    # Including: _validate_record, _get_record_key, _get_conflict_clause, 
-    # ingest_metrics, _ingest_alltime_metrics, _ingest_time_series_metrics, close, main
-    
-    # ... (copy remaining methods from original file)
+    def _validate_record(
+        self, record: Dict[str, Any], metric_type: MetricType
+    ) -> Optional[str]:
+        """Validate a transformed record."""
+        if not self.enable_validation:
+            return None
+
+        # Required fields validation
+        required_fields = ["account_id", "login"]
+        if metric_type != MetricType.ALLTIME:
+            required_fields.append("date")
+
+        for field in required_fields:
+            if field not in record or record[field] is None:
+                return f"Missing required field: {field}"
+
+        # Account ID should be a string
+        if not isinstance(record.get("account_id"), str):
+            return "account_id must be a string"
+
+        # Validate date format for time-series metrics
+        if metric_type != MetricType.ALLTIME and "date" in record:
+            if not isinstance(record["date"], date):
+                return "date must be a date object"
+
+        return None
+
+    def _get_record_key(self, record: Dict[str, Any], metric_type: MetricType) -> str:
+        """Generate unique key for record deduplication."""
+        if metric_type == MetricType.ALLTIME:
+            return f"{record['account_id']}"
+        elif metric_type == MetricType.HOURLY:
+            return f"{record['account_id']}_{record['date']}_{record.get('hour', 0)}"
+        else:  # DAILY
+            return f"{record['account_id']}_{record['date']}"
+
+    def _get_conflict_clause(self, table_name: str) -> str:
+        """Get the ON CONFLICT clause for the table."""
+        if "alltime" in table_name:
+            return "ON CONFLICT (account_id) DO UPDATE SET"
+        elif "hourly" in table_name:
+            return "ON CONFLICT (account_id, date, hour) DO UPDATE SET"
+        else:  # daily
+            return "ON CONFLICT (account_id, date) DO UPDATE SET"
+
+    def ingest_metrics(
+        self,
+        metric_type: str,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        logins: Optional[List[str]] = None,
+        accountids: Optional[List[str]] = None,
+        force_full_refresh: bool = False,
+        resume_from_checkpoint: bool = True,
+    ) -> int:
+        """Ingest metrics data for the specified type."""
+        try:
+            # Parse metric type
+            metric_enum = MetricType(metric_type.lower())
+        except ValueError:
+            raise ValueError(f"Invalid metric type: {metric_type}")
+
+        # Set table name for this ingestion
+        self.table_name = self.table_mapping[metric_enum]
+        
+        # Get the appropriate checkpoint manager and metrics
+        checkpoint_manager = self.checkpoint_managers[metric_enum.value]
+        metrics = self.metrics_by_type[metric_enum.value]
+        
+        # Override base class attributes for this run
+        self.checkpoint_manager = checkpoint_manager
+        self.metrics = metrics
+
+        logger.info(
+            f"Starting {metric_type} metrics ingestion to table {self.table_name}"
+        )
+
+        # Initialize checkpoint
+        checkpoint = None
+        if resume_from_checkpoint and not force_full_refresh:
+            checkpoint = checkpoint_manager.load_checkpoint()
+            if checkpoint:
+                logger.info(f"Resuming from checkpoint: {checkpoint}")
+
+        if force_full_refresh:
+            logger.info(f"Force refresh: truncating {self.table_name}")
+            self._truncate_table()
+            checkpoint_manager.clear_checkpoint()
+
+        try:
+            if metric_enum == MetricType.ALLTIME:
+                total_records = self._ingest_alltime_metrics(
+                    logins, accountids, checkpoint
+                )
+            else:
+                total_records = self._ingest_time_series_metrics(
+                    metric_enum, start_date, end_date, logins, accountids, checkpoint
+                )
+
+            # Save final checkpoint
+            checkpoint_manager.save_checkpoint(
+                {
+                    "metric_type": metric_type,
+                    "completion_time": datetime.now().isoformat(),
+                    "total_records": total_records,
+                    "metrics": metrics.to_dict(),
+                }
+            )
+
+            # Log final metrics
+            logger.info(f"Ingestion complete: {total_records} records processed")
+            metrics.log_final_summary()
+
+            return total_records
+
+        except Exception as e:
+            logger.error(f"Ingestion failed: {str(e)}")
+            raise
+
+    def _ingest_alltime_metrics(
+        self,
+        logins: Optional[List[str]] = None,
+        accountids: Optional[List[str]] = None,
+        checkpoint: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Ingest all-time metrics data with enhanced risk factors."""
+        try:
+            # Resume from checkpoint
+            start_page = 1
+            if checkpoint:
+                start_page = checkpoint.get("last_processed_page", 1) + 1
+                if start_page > 1:
+                    logger.info(f"Resuming from page {start_page}")
+
+            batch_data = []
+            pages_received = 0
+
+            for page_data in self.api_client.get_alltime_metrics_paginated(
+                logins=logins, accountids=accountids, start_page=start_page
+            ):
+                pages_received += 1
+                page_num = page_data.get("pagination", {}).get("page", start_page)
+                records = page_data.get("data", [])
+
+                logger.info(f"Processing page {page_num} with {len(records)} records")
+
+                for record in records:
+                    try:
+                        # Transform using enhanced field mappings
+                        transformed = self._transform_alltime_metric(record)
+
+                        # Validate record
+                        validation_error = self._validate_record(
+                            transformed, MetricType.ALLTIME
+                        )
+                        if validation_error:
+                            logger.warning(f"Validation failed: {validation_error}")
+                            self.metrics.validation_errors += 1
+                            continue
+
+                        # Check for duplicates
+                        if self.enable_deduplication:
+                            record_key = self._get_record_key(
+                                transformed, MetricType.ALLTIME
+                            )
+                            if record_key in self.seen_records:
+                                self.metrics.duplicates_found += 1
+                                continue
+                            self.seen_records.add(record_key)
+
+                        batch_data.append(transformed)
+                        self.metrics.new_records += 1
+
+                        # Insert in batches
+                        if len(batch_data) >= self.config.batch_size:
+                            self._insert_batch(batch_data)
+                            batch_data = []
+
+                        # Save checkpoint periodically
+                        if self.metrics.new_records % 10000 == 0:
+                            self.checkpoint_manager.save_checkpoint(
+                                {
+                                    "metric_type": "alltime",
+                                    "last_processed_page": page_num,
+                                    "total_records": self.metrics.total_records,
+                                    "metrics": self.metrics.to_dict(),
+                                }
+                            )
+
+                    except Exception as e:
+                        logger.error(f"Error processing record: {str(e)}")
+                        self.metrics.transformation_errors += 1
+
+            # Insert remaining records
+            if batch_data:
+                self._insert_batch(batch_data)
+
+            if pages_received == 0:
+                logger.warning(f"No data pages received from API for {self.ingestion_type}")
+
+            return self.metrics.new_records
+
+        except Exception as e:
+            if "API" in str(e) or "rate limit" in str(e):
+                self.metrics.api_errors += 1
+            logger.error(f"Error during alltime metrics ingestion: {str(e)}", exc_info=True)
+            raise
+
+    def _ingest_time_series_metrics(
+        self,
+        metric_type: MetricType,
+        start_date: Optional[date],
+        end_date: Optional[date],
+        logins: Optional[List[str]],
+        accountids: Optional[List[str]],
+        checkpoint: Optional[Dict[str, Any]],
+    ) -> int:
+        """Ingest daily or hourly metrics data with enhanced risk factors."""
+        # Determine date range
+        if not end_date:
+            end_date = datetime.now().date() - timedelta(days=1)
+        if not start_date:
+            start_date = end_date - timedelta(days=30)
+
+        # Resume from checkpoint if available
+        if checkpoint:
+            checkpoint_date = checkpoint.get("last_processed_date")
+            if checkpoint_date:
+                start_date = datetime.strptime(checkpoint_date, "%Y-%m-%d").date()
+
+        logger.info(f"Processing {metric_type.value} metrics from {start_date} to {end_date}")
+
+        current_date = start_date
+        total_records = 0
+
+        while current_date <= end_date:
+            try:
+                logger.info(f"Processing {metric_type.value} metrics for {current_date}")
+
+                batch_data = []
+                pages_received = 0
+
+                # Get the appropriate API method
+                if metric_type == MetricType.DAILY:
+                    api_method = self.api_client.get_daily_metrics_paginated
+                else:  # HOURLY
+                    api_method = self.api_client.get_hourly_metrics_paginated
+
+                for page_data in api_method(
+                    date=current_date,
+                    logins=logins,
+                    accountids=accountids,
+                ):
+                    pages_received += 1
+                    records = page_data.get("data", [])
+
+                    for record in records:
+                        try:
+                            # Transform using enhanced field mappings
+                            if metric_type == MetricType.DAILY:
+                                transformed = self._transform_daily_metric(record)
+                            else:
+                                transformed = self._transform_hourly_metric(record)
+
+                            # Validate record
+                            validation_error = self._validate_record(transformed, metric_type)
+                            if validation_error:
+                                logger.warning(f"Validation failed: {validation_error}")
+                                self.metrics.validation_errors += 1
+                                continue
+
+                            # Check for duplicates
+                            if self.enable_deduplication:
+                                record_key = self._get_record_key(transformed, metric_type)
+                                if record_key in self.seen_records:
+                                    self.metrics.duplicates_found += 1
+                                    continue
+                                self.seen_records.add(record_key)
+
+                            batch_data.append(transformed)
+                            self.metrics.new_records += 1
+
+                            # Insert in batches
+                            if len(batch_data) >= self.config.batch_size:
+                                self._insert_batch(batch_data)
+                                batch_data = []
+
+                        except Exception as e:
+                            logger.error(f"Error processing record: {str(e)}")
+                            self.metrics.transformation_errors += 1
+
+                # Insert remaining records for this date
+                if batch_data:
+                    self._insert_batch(batch_data)
+
+                total_records += len(batch_data)
+
+                # Save checkpoint after each date
+                self.checkpoint_manager.save_checkpoint(
+                    {
+                        "metric_type": metric_type.value,
+                        "last_processed_date": current_date.strftime("%Y-%m-%d"),
+                        "total_records": total_records,
+                        "metrics": self.metrics.to_dict(),
+                    }
+                )
+
+                if pages_received == 0:
+                    logger.info(f"No data for {current_date}")
+
+            except Exception as e:
+                logger.error(f"Error processing {current_date}: {str(e)}")
+                self.metrics.api_errors += 1
+
+            current_date += timedelta(days=1)
+
+        return total_records
+
+    def close(self):
+        """Close the ingester and clean up resources."""
+        try:
+            if hasattr(self.api_client, 'close'):
+                self.api_client.close()
+        except Exception as e:
+            logger.error(f"Error closing API client: {str(e)}")
+
+        # Close database connections from base class
+        super().close()
 
 
 def main():

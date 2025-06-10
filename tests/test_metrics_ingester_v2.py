@@ -16,8 +16,8 @@ class TestMetricsIngesterV2:
     @pytest.fixture
     def ingester(self):
         """Create a test instance of MetricsIngesterV2."""
-        with patch("src.data_ingestion.ingest_metrics_v2.get_db_manager"):
-            with patch("src.data_ingestion.ingest_metrics_v2.RiskAnalyticsAPIClient"):
+        with patch("src.data_ingestion.base_ingester.get_db_manager"):
+            with patch("src.utils.api_client.RiskAnalyticsAPIClient"):
                 return MetricsIngesterV2(
                     checkpoint_dir="/tmp/test_checkpoints",
                     enable_validation=True,
@@ -340,8 +340,9 @@ class TestMetricsIngesterV2:
         missing_fields = critical_fields - set(result.keys())
         assert not missing_fields, f"Missing critical fields: {missing_fields}"
 
-    @patch('src.data_ingestion.ingest_metrics_v2.get_db_manager')
-    def test_bulk_processing_with_risk_metrics(self, mock_db_manager):
+    @patch('src.data_ingestion.base_ingester.get_db_manager')
+    @patch('src.utils.api_client.RiskAnalyticsAPIClient')
+    def test_bulk_processing_with_risk_metrics(self, mock_api_client, mock_db_manager):
         """Test bulk processing handles all new risk metrics correctly."""
         # This would be an integration test in practice
         # Here we just verify the structure is correct

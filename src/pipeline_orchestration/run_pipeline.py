@@ -43,8 +43,8 @@ class PipelineOrchestrator:
                     ("ingest_accounts", "data_ingestion.ingest_accounts"),
                     ("ingest_plans", "data_ingestion.ingest_plans"),
                     ("ingest_regimes", "data_ingestion.ingest_regimes"),
-                    ("ingest_metrics_alltime", "data_ingestion.ingest_metrics"),
-                    ("ingest_metrics_daily", "data_ingestion.ingest_metrics"),
+                    ("ingest_metrics_alltime", "data_ingestion.ingest_metrics_v2"),
+                    ("ingest_metrics_daily", "data_ingestion.ingest_metrics_v2"),
                     ("ingest_trades_open", "data_ingestion.ingest_trades"),
                     ("ingest_trades_closed", "data_ingestion.ingest_trades"),
                 ],
@@ -61,7 +61,7 @@ class PipelineOrchestrator:
             "feature_engineering": {
                 "name": "Feature Engineering",
                 "scripts": [
-                    ("engineer_features", "feature_engineering.engineer_features"),
+                    ("engineer_features", "feature_engineering.engineer_features_v2"),
                     ("build_training_data", "feature_engineering.build_training_data"),
                 ],
             },

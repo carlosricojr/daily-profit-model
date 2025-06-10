@@ -387,7 +387,7 @@ ingest_regimes = PipelineOperator(
 ingest_metrics_alltime = PipelineOperator(
     task_id="ingest_metrics_alltime",
     stage_name="ingest_metrics_alltime",
-    module_path="data_ingestion.ingest_metrics",
+    module_path="data_ingestion.ingest_metrics_v2",
     stage_args=["alltime", "--log-level", "INFO"],
     dag=dag,
     pool="ingestion_pool",
@@ -396,7 +396,7 @@ ingest_metrics_alltime = PipelineOperator(
 ingest_metrics_daily = PipelineOperator(
     task_id="ingest_metrics_daily",
     stage_name="ingest_metrics_daily",
-    module_path="data_ingestion.ingest_metrics",
+    module_path="data_ingestion.ingest_metrics_v2",
     stage_args=[
         "daily",
         "--start-date",
@@ -478,7 +478,7 @@ preprocessing = PipelineOperator(
 feature_engineering = PipelineOperator(
     task_id="feature_engineering",
     stage_name="feature_engineering",
-    module_path="feature_engineering.engineer_features",
+    module_path="feature_engineering.engineer_features_v2",
     stage_args=[
         "--start-date",
         '{{ (execution_date - macros.timedelta(days=2)).strftime("%Y-%m-%d") }}',

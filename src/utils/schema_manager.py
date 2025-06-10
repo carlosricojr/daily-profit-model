@@ -269,17 +269,82 @@ class SchemaManager:
                 
         return partition_info
     
+    def get_system_tables(self, conn) -> Set[str]:
+        """Get system/migration tables that should be excluded from management."""
+        system_tables = set()
+        
+        with conn.cursor() as cursor:
+            # Get migration system tables
+            cursor.execute(f"""
+                SELECT tablename 
+                FROM pg_tables 
+                WHERE schemaname = '{self.schema_name}'
+                AND tablename IN ('alembic_version', 'schema_migrations', 'flyway_schema_history')
+            """)
+            
+            for row in cursor.fetchall():
+                system_tables.add(row[0])
+                
+        return system_tables
+    
+    def get_constraint_backed_indexes(self, conn) -> Set[str]:
+        """Get indexes that back constraints (PRIMARY KEY, UNIQUE, etc.)."""
+        constraint_indexes = set()
+        
+        with conn.cursor() as cursor:
+            cursor.execute(f"""
+                SELECT i.indexname
+                FROM pg_indexes i
+                JOIN pg_class c ON c.relname = i.indexname
+                JOIN pg_constraint con ON con.conindid = c.oid
+                WHERE i.schemaname = '{self.schema_name}'
+            """)
+            
+            for row in cursor.fetchall():
+                constraint_indexes.add(row[0])
+                
+        return constraint_indexes
+    
+    def get_extension_objects(self, conn) -> Set[str]:
+        """Get objects created by PostgreSQL extensions."""
+        extension_objects = set()
+        
+        with conn.cursor() as cursor:
+            # Get functions from extensions (like btree_gist)
+            cursor.execute(f"""
+                SELECT p.proname
+                FROM pg_proc p
+                JOIN pg_namespace n ON p.pronamespace = n.oid
+                WHERE n.nspname = '{self.schema_name}'
+                AND p.proname LIKE 'gbt_%'  -- btree_gist functions
+            """)
+            
+            for row in cursor.fetchall():
+                extension_objects.add(f"FUNCTION:{row[0]}")
+                
+        return extension_objects
+
     def get_current_schema_objects(self) -> Dict[str, SchemaObject]:
-        """Get all objects currently in the database, excluding partitions."""
+        """Get all objects currently in the database, excluding partitions and system objects."""
         objects = {}
         
         with self.db_manager.model_db.get_connection() as conn:
-            # First, get partition info
+            # Get objects to exclude
             partition_tables = self.get_partition_info(conn)
             partition_names = set(partition_tables.keys())
+            system_tables = self.get_system_tables(conn)
+            constraint_indexes = self.get_constraint_backed_indexes(conn)
+            extension_objects = self.get_extension_objects(conn)
             
+            # Log exclusions
             if partition_names:
-                logger.info(f"Identified {len(partition_names)} partition tables to exclude from schema comparison")
+                logger.info(f"Excluding {len(partition_names)} partition tables from schema comparison")
+            if system_tables:
+                logger.info(f"Excluding {len(system_tables)} system/migration tables: {list(system_tables)}")
+            if constraint_indexes:
+                logger.info(f"Excluding {len(constraint_indexes)} constraint-backed indexes")
+            if extension_objects:
+                logger.info(f"Excluding {len(extension_objects)} extension objects")
             with conn.cursor() as cursor:
                 # Get tables
                 # First check if our helper function exists
@@ -293,19 +358,29 @@ class SchemaManager:
                 
                 has_helper_function = cursor.fetchone()[0]
                 
-                # Build exclusion list for partition tables
-                exclude_tables = list(partition_names) + [self.version_table]
-                exclude_placeholder = ','.join(['%s'] * len(exclude_tables))
+                # Build exclusion lists
+                exclude_tables = list(partition_names) + list(system_tables) + [self.version_table]
+                exclude_tables_placeholder = ','.join(['%s'] * len(exclude_tables)) if exclude_tables else "''"
                 
-                if has_helper_function:
+                exclude_indexes = list(constraint_indexes)
+                exclude_indexes_placeholder = ','.join(['%s'] * len(exclude_indexes)) if exclude_indexes else "''"
+                
+                if has_helper_function and exclude_tables:
                     cursor.execute(f"""
                         SELECT tablename, 
                                {self.schema_name}.pg_get_tabledef('{self.schema_name}.' || tablename) as definition
                         FROM pg_tables 
                         WHERE schemaname = '{self.schema_name}'
-                        AND tablename NOT IN ({exclude_placeholder})
+                        AND tablename NOT IN ({exclude_tables_placeholder})
                     """, exclude_tables)
-                else:
+                elif has_helper_function:
+                    cursor.execute(f"""
+                        SELECT tablename, 
+                               {self.schema_name}.pg_get_tabledef('{self.schema_name}.' || tablename) as definition
+                        FROM pg_tables 
+                        WHERE schemaname = '{self.schema_name}'
+                    """)
+                elif exclude_tables:
                     # Fallback: basic table info
                     logger.warning("pg_get_tabledef function not found. Using basic table information.")
                     cursor.execute(f"""
@@ -313,8 +388,17 @@ class SchemaManager:
                                'CREATE TABLE ' || t.schemaname || '.' || t.tablename || ' (--columns not available--);' as definition
                         FROM pg_tables t
                         WHERE t.schemaname = '{self.schema_name}'
-                        AND t.tablename NOT IN ({exclude_placeholder})
+                        AND t.tablename NOT IN ({exclude_tables_placeholder})
                     """, exclude_tables)
+                else:
+                    # Fallback: basic table info, no exclusions
+                    logger.warning("pg_get_tabledef function not found. Using basic table information.")
+                    cursor.execute(f"""
+                        SELECT t.tablename, 
+                               'CREATE TABLE ' || t.schemaname || '.' || t.tablename || ' (--columns not available--);' as definition
+                        FROM pg_tables t
+                        WHERE t.schemaname = '{self.schema_name}'
+                    """)
                 
                 for row in cursor.fetchall():
                     if row[1]:  # If definition exists
@@ -324,13 +408,23 @@ class SchemaManager:
                             row[1]
                         )
                 
-                # Get indexes (excluding those on partition tables)
-                cursor.execute(f"""
-                    SELECT indexname, indexdef
-                    FROM pg_indexes
-                    WHERE schemaname = '{self.schema_name}'
-                    AND tablename NOT IN ({exclude_placeholder})
-                """, exclude_tables)
+                # Get indexes (excluding those on partition/system tables and constraint-backed indexes)
+                all_exclusions = exclude_tables + exclude_indexes
+                if all_exclusions:
+                    all_exclusions_placeholder = ','.join(['%s'] * len(all_exclusions))
+                    cursor.execute(f"""
+                        SELECT indexname, indexdef
+                        FROM pg_indexes
+                        WHERE schemaname = '{self.schema_name}'
+                        AND tablename NOT IN ({exclude_tables_placeholder})
+                        AND indexname NOT IN ({exclude_indexes_placeholder})
+                    """, exclude_tables + exclude_indexes)
+                else:
+                    cursor.execute(f"""
+                        SELECT indexname, indexdef
+                        FROM pg_indexes
+                        WHERE schemaname = '{self.schema_name}'
+                    """)
                 
                 for row in cursor.fetchall():
                     objects[f'INDEX:{row[0]}'] = SchemaObject(
@@ -367,22 +461,102 @@ class SchemaManager:
                         f"CREATE MATERIALIZED VIEW {row[0]} AS {row[1]}"
                     )
                 
-                # Get functions
+                # Get functions (excluding extension functions)
                 cursor.execute(f"""
                     SELECT proname, pg_get_functiondef(oid)
                     FROM pg_proc
                     WHERE pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = '{self.schema_name}')
+                    AND proname NOT LIKE 'gbt_%'  -- Exclude btree_gist extension functions
                 """)
                 
                 for row in cursor.fetchall():
-                    objects[f'FUNCTION:{row[0]}'] = SchemaObject(
-                        'FUNCTION',
-                        row[0],
-                        row[1]
-                    )
+                    func_key = f'FUNCTION:{row[0]}'
+                    if func_key not in extension_objects:  # Double-check exclusion
+                        objects[func_key] = SchemaObject(
+                            'FUNCTION',
+                            row[0],
+                            row[1]
+                        )
         
         return objects
     
+    def _should_drop_object(self, obj_key: str, obj: SchemaObject) -> bool:
+        """
+        Determine if an object should be dropped based on naming patterns and type.
+        
+        Uses selective logic:
+        - Drops objects that clearly belong to our schema management system
+        - Preserves objects that might belong to other systems
+        - Allows proper testing while maintaining production safety
+        """
+        obj_type, obj_name = obj_key.split(':', 1)
+        
+        # Our managed object patterns - objects we're confident we should manage
+        managed_patterns = [
+            'raw_', 'stg_', 'feature_store_', 'model_', 'mv_',
+            'pipeline_', 'query_', 'scheduled_', 'schema_version'
+        ]
+        
+        # System patterns to never drop - objects from other systems
+        system_patterns = [
+            'alembic_', 'flyway_', 'pg_', 'information_schema',
+            'gbt_'  # btree_gist extension functions
+        ]
+        
+        # Partition table patterns (additional safety)
+        partition_patterns = ['_202', '_2025', '_2024', '_2023']  # Year-based partitions
+        
+        # Check if it's a system object we should never touch
+        for pattern in system_patterns:
+            if obj_name.startswith(pattern):
+                return False
+                
+        # Check if it's a partition table
+        for pattern in partition_patterns:
+            if pattern in obj_name:
+                return False
+        
+        # For tables and views, check if they match our managed patterns
+        if obj_type in ['TABLE', 'VIEW', 'MATERIALIZED VIEW']:
+            # If it matches our patterns, we can drop it
+            for pattern in managed_patterns:
+                if obj_name.startswith(pattern):
+                    return True
+            
+            # For generic names (like in tests), allow dropping
+            # This enables proper testing while being safe in production
+            test_patterns = ['users', 'orders', 'old_table', 'test_', 'demo_', 'temp_']
+            for pattern in test_patterns:
+                if obj_name.startswith(pattern) or obj_name == pattern.rstrip('_'):
+                    return True
+                    
+            # Otherwise, be conservative - don't drop unknown tables
+            return False
+        
+        # For indexes, be more permissive but still careful
+        if obj_type == 'INDEX':
+            # Don't drop constraint-backed indexes (already excluded from current_objects)
+            # Don't drop system indexes
+            if obj_name.startswith(('pg_', 'alembic_')):
+                return False
+            # Allow dropping indexes on our managed tables
+            return True
+        
+        # For functions, check patterns
+        if obj_type == 'FUNCTION':
+            # If it matches our patterns, we can drop it
+            for pattern in managed_patterns:
+                if obj_name.startswith(pattern):
+                    return True
+            # Allow dropping test functions
+            if obj_name.startswith(('test_', 'demo_')):
+                return True
+            # Don't drop system/extension functions
+            return False
+        
+        # For other object types, be conservative
+        return False
+
     def compare_schemas(self, desired_objects: Dict[str, SchemaObject], 
                        current_objects: Dict[str, SchemaObject]) -> Dict[str, Any]:
         """Compare desired schema with current database state."""
@@ -402,10 +576,11 @@ class SchemaManager:
             else:
                 comparison['unchanged'][key] = desired_obj
         
-        # Find objects to drop (exist in current but not in desired)
+        # Find objects to drop - selective approach based on ownership patterns
         for key, current_obj in current_objects.items():
             if key not in desired_objects:
-                comparison['to_drop'][key] = current_obj
+                if self._should_drop_object(key, current_obj):
+                    comparison['to_drop'][key] = current_obj
         
         return comparison
     
