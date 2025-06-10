@@ -15,13 +15,12 @@ def test_validation():
     """Test that validation is working."""
     ingester = TradesIngester(enable_validation=True)
 
-    # Test valid trade
+    # Test valid trade (using actual API field names)
     valid_trade = {
-        "tradeId": "123",
-        "accountId": "456",
-        "login": "user1",
-        "symbol": "EURUSD",
-        "side": "buy",
+        "position": "W89948879651022156",  # This is the unique ID
+        "login": "80039260",
+        "stdSymbol": "EURUSD",  # This is what we use for symbol
+        "side": "Buy",
         "openTime": "2024-01-15T10:00:00Z",
         "closeTime": "2024-01-15T11:00:00Z",
         "profit": 100.0,
@@ -35,12 +34,12 @@ def test_validation():
 
     # Test invalid trade - missing required field
     invalid_trade1 = valid_trade.copy()
-    del invalid_trade1["tradeId"]
+    del invalid_trade1["position"]
 
     is_valid, errors = ingester._validate_trade_record(invalid_trade1, "closed")
-    print(f"Invalid trade (missing tradeId) validation: {is_valid}, errors: {errors}")
+    print(f"Invalid trade (missing position) validation: {is_valid}, errors: {errors}")
     assert not is_valid
-    assert "Missing required field: tradeId" in errors
+    assert "Missing required field: position" in errors
 
     # Test invalid trade - negative lots
     invalid_trade2 = valid_trade.copy()
@@ -66,7 +65,7 @@ def test_validation():
 
     # Simulate validation errors
     metrics.invalid_records += 1
-    metrics.validation_errors["Missing required field: tradeId"] += 1
+    metrics.validation_errors["Missing required field: position"] += 1
     metrics.validation_errors["Lots must be positive"] += 1
 
     print(f"Updated metrics - invalid records: {metrics.invalid_records}")

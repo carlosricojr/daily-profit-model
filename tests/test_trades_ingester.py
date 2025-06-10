@@ -81,13 +81,12 @@ class TestTradesIngester:
         """Test trade record validation."""
         ingester = TradesIngester()
 
-        # Valid closed trade (using API field names)
+        # Valid closed trade (using actual API field names)
         valid_closed = {
-            "tradeId": "123",
-            "accountId": "456",
-            "login": "user1",
-            "symbol": "EURUSD",
-            "side": "buy",
+            "position": "W89948879651022156",  # This is the unique ID
+            "login": "80039260",
+            "stdSymbol": "EURUSD",  # This is what we use for symbol
+            "side": "Buy",
             "openTime": "2024-01-15T10:00:00Z",
             "closeTime": "2024-01-15T11:00:00Z",
             "profit": 100.0,
@@ -99,10 +98,10 @@ class TestTradesIngester:
 
         # Invalid - missing required field
         invalid = valid_closed.copy()
-        del invalid["tradeId"]
+        del invalid["position"]
         is_valid, errors = ingester._validate_trade_record(invalid, "closed")
         assert is_valid is False
-        assert any("Missing required field: tradeId" in error for error in errors)
+        assert any("Missing required field: position" in error for error in errors)
 
         # Invalid - negative lots
         invalid = valid_closed.copy()

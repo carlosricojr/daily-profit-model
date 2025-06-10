@@ -287,7 +287,7 @@ class TradesIngester:
                                 for error in errors:
                                     self.metrics.validation_errors[error] += 1
                                 logger.debug(
-                                    f"Invalid closed trade {trade.get('tradeId')}: {errors}"
+                                    f"Invalid closed trade {trade.get('position')}: {errors}"
                                 )
                                 continue
 
@@ -370,7 +370,7 @@ class TradesIngester:
                             for error in errors:
                                 self.metrics.validation_errors[error] += 1
                             logger.debug(
-                                f"Invalid open trade {trade.get('tradeId')}: {errors}"
+                                f"Invalid open trade {trade.get('position')}: {errors}"
                             )
                             continue
 
@@ -401,18 +401,21 @@ class TradesIngester:
         open_time = self._parse_timestamp(trade.get("openTime"))
         close_time = self._parse_timestamp(trade.get("closeTime"))
 
-        # Parse trade date from YYYYMMDD format
-        trade_date_str = str(trade.get("tradeDate", ""))
-        if trade_date_str and len(trade_date_str) == 8:
-            trade_date = datetime.strptime(trade_date_str, "%Y%m%d").date()
+        # Parse trade date from ISO format (e.g. "2025-06-09T00:00:00.000Z")
+        trade_date_str = trade.get("tradeDate", "")
+        if trade_date_str:
+            try:
+                trade_date = datetime.strptime(trade_date_str[:10], "%Y-%m-%d").date()
+            except:
+                trade_date = None
         else:
             trade_date = None
 
         return {
-            "trade_id": trade.get("tradeId"),
-            "account_id": trade.get("accountId"),
+            "trade_id": trade.get("position"),  # position is the unique identifier
+            "account_id": self._resolve_account_id(trade),
             "login": trade.get("login"),
-            "symbol": trade.get("symbol"),
+            "symbol": trade.get("stdSymbol"),  # use stdSymbol for symbol field
             "std_symbol": trade.get("stdSymbol"),
             "side": trade.get("side"),
             "open_time": open_time,
@@ -436,29 +439,32 @@ class TradesIngester:
         # Parse timestamps
         open_time = self._parse_timestamp(trade.get("openTime"))
 
-        # Parse trade date
-        trade_date_str = str(trade.get("tradeDate", ""))
-        if trade_date_str and len(trade_date_str) == 8:
-            trade_date = datetime.strptime(trade_date_str, "%Y%m%d").date()
+        # Parse trade date from ISO format (e.g. "2025-06-09T00:00:00.000Z")
+        trade_date_str = trade.get("tradeDate", "")
+        if trade_date_str:
+            try:
+                trade_date = datetime.strptime(trade_date_str[:10], "%Y-%m-%d").date()
+            except:
+                trade_date = None
         else:
             trade_date = None
 
         return {
-            "trade_id": trade.get("tradeId"),
-            "account_id": trade.get("accountId"),
+            "trade_id": trade.get("position"),  # position is the unique identifier
+            "account_id": self._resolve_account_id(trade),
             "login": trade.get("login"),
-            "symbol": trade.get("symbol"),
+            "symbol": trade.get("stdSymbol"),  # use stdSymbol for symbol field
             "std_symbol": trade.get("stdSymbol"),
             "side": trade.get("side"),
             "open_time": open_time,
             "trade_date": trade_date,
             "open_price": self._safe_float(trade.get("openPrice")),
-            "current_price": self._safe_float(trade.get("currentPrice")),
+            "current_price": self._safe_float(trade.get("closePrice")),  # closePrice is current price for open trades
             "stop_loss": self._safe_float(trade.get("stopLoss")),
             "take_profit": self._safe_float(trade.get("takeProfit")),
             "lots": self._safe_float(trade.get("lots")),
             "volume_usd": self._safe_float(trade.get("volumeUSD")),
-            "unrealized_pnl": self._safe_float(trade.get("unrealizedPnL")),
+            "unrealized_pnl": self._safe_float(trade.get("profit")),  # profit field for open trades
             "commission": self._safe_float(trade.get("commission")),
             "swap": self._safe_float(trade.get("swap")),
             "ingestion_timestamp": datetime.now(),
@@ -471,12 +477,11 @@ class TradesIngester:
         """Validate trade record and return validation errors."""
         errors = []
 
-        # Required fields
+        # Required fields - updated to match actual API response
         required_fields = [
-            "tradeId",
-            "accountId",
+            "position",  # unique identifier for trades
             "login",
-            "symbol",
+            "stdSymbol",  # standardized symbol
             "side",
             "openTime",
         ]
@@ -523,6 +528,16 @@ class TradesIngester:
             return result
         except (ValueError, TypeError):
             return None
+
+    def _resolve_account_id(self, trade: Dict[str, Any]) -> str:
+        """
+        Resolve account_id from login and platform.
+        For now, return login as account_id since we don't have platform/mt_version mapping yet.
+        TODO: Implement proper mapping when platform/mt_version data is available.
+        """
+        # In the future, this should query raw_accounts_data based on login and platform
+        # to get the correct account_id when multiple accounts share the same login
+        return trade.get("login", "")
 
     def _parse_timestamp(self, timestamp_str: Optional[str]) -> Optional[datetime]:
         """Parse various timestamp formats from the API."""
@@ -576,9 +591,16 @@ class TradesIngester:
             """
 
             # Use ON CONFLICT to handle duplicates gracefully
-            query += """
-            ON CONFLICT (trade_id) DO NOTHING
-            """
+            # Using composite key from schema: (trade_id, account_id, trade_date) for closed trades
+            if table_name == "raw_trades_closed":
+                query += """
+                ON CONFLICT (trade_id, account_id, trade_date) DO NOTHING
+                """
+            else:
+                # For open trades: (trade_id, account_id, ingestion_timestamp)
+                query += """
+                ON CONFLICT (trade_id, account_id, ingestion_timestamp) DO NOTHING
+                """
 
             # Convert to list of tuples
             values = [tuple(record[col] for col in columns) for record in batch_data]

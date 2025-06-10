@@ -1,146 +1,134 @@
-# Database Schema - Production Ready Structure
+# Database Schema
 
-## Overview
+This directory contains the database schema and maintenance scripts for the Daily Profit Model.
 
-This directory contains the production-ready database schema for the Daily Profit Model system. The structure has been optimized for performance, maintainability, and scalability.
+## Structure
 
-## Current Production Schema
+- `schema.sql` - Main consolidated schema file containing all tables, indexes, functions, and materialized views
+- `indexes/` - Index management and analysis scripts
+- `maintenance/` - Performance testing and maintenance scripts
+- `docs/` - Database documentation and analysis reports
+- `archive/` - Old schema versions and migration files (not used in current development)
+  - `migrations/` - Archived migration files that have been integrated into schema.sql
 
-- **`schema.sql`** - **Main production schema** (v2 balanced optimization)
-  - Includes table partitioning for 81M+ trade records
-  - Materialized views for 80% faster queries
-  - Automated maintenance functions
-  - Migration versioning support
+## Usage
 
-- **`schema_baseline.sql`** - Original baseline schema (preserved for reference)
+### Intelligent Schema Management (Recommended)
 
-## Directory Structure
+The system now includes intelligent schema management that:
+- Compares current database state with desired schema
+- Generates migrations only for differences
+- Preserves existing data by default
+- Provides dry-run mode to preview changes
+- Tracks schema versions for rollback capability
 
-### Production Files
-- **`migrations/`** - Database migration scripts
-  - `001_add_partitioning.sql` - Implements table partitioning
-  - `002_add_materialized_views.sql` - Creates materialized views
-  - `alembic.ini` - Migration configuration
+```bash
+# Check schema compliance and apply changes (preserves data)
+python src/pipeline_orchestration/run_pipeline.py --stages schema
 
-- **`indexes/`** - Index management scripts
-  - `partition_index_management.sql` - Partition-aware index management
+# Preview what changes would be made without applying them
+python src/pipeline_orchestration/run_pipeline.py --stages schema --dry-run
 
-- **`maintenance/`** - Database maintenance scripts
-  - `performance_tests.sql` - Performance testing queries
-
-- **`docs/`** - Documentation
-  - `schema_analysis_report.md` - Comprehensive schema analysis
-
-### Archived Versions
-Previous schema versions are preserved in the main project archive at `/archive/db_schema_versions/`:
-- `v1_conservative/` - Basic optimizations with minimal risk
-- `v2_balanced/` - **Source of current production schema**
-- `v3_aggressive/` - Advanced optimizations for future scaling
-
-## Production Schema Features
-
-### Performance Optimizations
-- **Table Partitioning**: Monthly partitions for `raw_trades_closed` and yearly for `raw_metrics_daily`
-- **Materialized Views**: Pre-calculated aggregations for common queries
-- **Strategic Indexing**: Optimized indexes for query patterns
-- **Automated Maintenance**: Functions for partition creation and view refresh
-
-### Key Benefits
-- **80% faster queries** compared to baseline schema
-- **Handles 81M+ trade records** efficiently with partitioning
-- **99% faster aggregations** with materialized views
-- **Zero-downtime migrations** with versioning support
-
-### Tables Structure
-
-#### Partitioned Tables (High Volume)
-- `raw_trades_closed` - Partitioned by `trade_date` (monthly)
-- `raw_metrics_daily` - Partitioned by `date` (yearly)
-
-#### Materialized Views
-- `mv_account_performance_summary` - Account-level aggregations
-- `mv_daily_trading_stats` - Daily market statistics
-- `mv_symbol_performance` - Symbol-level performance metrics
-
-#### Reference Tables
-- `raw_accounts_data` - Account information
-- `raw_plans_data` - Trading plan definitions
-- Various metrics and feature tables
-
-## Deployment Instructions
-
-### Initial Setup
-```sql
--- Run main schema
-psql -f schema.sql
-
--- The schema includes automatic partition creation
--- Materialized views are created with initial data
+# Force faster migration without preserving data in dropped tables
+python src/pipeline_orchestration/run_pipeline.py --stages schema --no-preserve-data
 ```
 
-### Migrations
-```sql
--- Apply migrations in order
-psql -f migrations/001_add_partitioning.sql
-psql -f migrations/002_add_materialized_views.sql
+### Force Recreate Schema (Development Only)
+
+**WARNING**: This will DROP the entire `prop_trading_model` schema and recreate it from scratch!
+
+```bash
+# Force drop and recreate (DESTROYS ALL DATA!)
+python src/pipeline_orchestration/run_pipeline.py --stages schema --force-recreate-schema
+
+# Or directly with psql (also destructive)
+psql -U your_user -d your_database -f src/db_schema/schema.sql
 ```
 
-### Maintenance
-```sql
--- Create new partitions (automated monthly)
-SELECT create_monthly_partitions();
+### Setup Schema Helper Functions
 
--- Refresh materialized views (automated hourly)
-SELECT refresh_materialized_views();
+For full schema comparison functionality, run this once:
 
--- Analyze partition performance
-SELECT * FROM analyze_partitions();
+```bash
+psql -U your_user -d your_database -f src/db_schema/setup_schema_functions.sql
 ```
 
-## Performance Testing
+### Key Features
 
-Run performance benchmarks:
+1. **Partitioned Tables**:
+   - `raw_metrics_daily` - Partitioned by month
+   - `raw_trades_closed` - Partitioned by month
+   
+2. **Materialized Views**:
+   - `mv_account_performance_summary` - Account-level performance metrics
+   - `mv_daily_trading_stats` - Daily aggregate statistics
+   - `mv_symbol_performance` - Symbol-level performance analysis
+   - `mv_account_trading_patterns` - Trading behavior patterns
+   - `mv_market_regime_performance` - Performance by market conditions
+
+3. **Functions**:
+   - `refresh_materialized_views()` - Refresh all materialized views
+   - `create_monthly_partitions()` - Create new monthly partitions
+   - `drop_old_partitions()` - Clean up old partitions
+
+## Schema Versioning
+
+The system automatically tracks schema versions in the `schema_version` table:
+
 ```sql
+-- View migration history
+SELECT version_id, version_hash, applied_at, description, status
+FROM prop_trading_model.schema_version
+ORDER BY applied_at DESC;
+
+-- View current schema version
+SELECT version_hash, applied_at
+FROM prop_trading_model.schema_version
+WHERE status = 'applied'
+ORDER BY applied_at DESC
+LIMIT 1;
+```
+
+Auto-generated migrations are saved in `src/db_schema/auto_migrations/` with timestamp-based naming.
+
+## Recent Schema Changes
+
+- **Trades Tables**: The `account_id` column in both `raw_trades_closed` and `raw_trades_open` tables is now nullable. This allows ingestion of trades where only the login is available initially, with account_id being resolved later when platform/mt_version mapping is implemented. Login indexes have been added for efficient account resolution.
+
+## Development Notes
+
+The system supports two modes:
+
+1. **Intelligent Migration Mode** (Default):
+   - Compares current schema with desired state
+   - Generates minimal migrations
+   - Preserves data
+   - Tracks versions
+   - Supports rollback
+
+2. **Force Recreate Mode** (Development):
+   - Drops entire schema
+   - Recreates from scratch
+   - Fast but destructive
+   - Good for initial setup or testing
+
+## Partition Management
+
+The schema automatically creates partitions for the last 3 years plus 3 months into the future. To add more partitions:
+
+```sql
+SELECT prop_trading_model.create_monthly_partitions('raw_metrics_daily', '2025-01-01'::date, '2025-12-31'::date);
+SELECT prop_trading_model.create_monthly_partitions('raw_trades_closed', '2025-01-01'::date, '2025-12-31'::date);
+```
+
+## Performance Monitoring
+
+Use the scripts in `maintenance/` to monitor performance:
+
+```sql
+-- Check partition sizes and usage
+SELECT * FROM prop_trading_model.v_partition_stats;
+
+-- Run performance tests
 \i maintenance/performance_tests.sql
 ```
-
-Expected results with v2 schema:
-- 10x faster trade queries with partition pruning
-- 99% faster daily aggregations with materialized views
-- Sub-second response for dashboard queries
-
-## Migration from Baseline
-
-If upgrading from baseline schema:
-
-1. **Backup existing data**
-2. **Apply partitioning migration**: `001_add_partitioning.sql`
-3. **Create materialized views**: `002_add_materialized_views.sql` 
-4. **Update application queries** to use materialized views where appropriate
-5. **Set up automated maintenance** jobs
-
-## Future Scaling
-
-For extreme scale requirements (1B+ records), consider upgrading to `/archive/db_schema_versions/v3_aggressive/`:
-- Horizontal sharding across multiple databases
-- Time-series database optimizations (TimescaleDB)
-- Columnar storage for analytics queries
-
-## Monitoring
-
-The schema includes built-in performance monitoring:
-- Query performance logging via `query_performance_log`
-- Partition size analysis via `analyze_partitions()`
-- Automated statistics collection
-
-## Support
-
-For schema modifications or performance tuning:
-1. Review `docs/schema_analysis_report.md` for detailed analysis
-2. Test changes on archived versions first
-3. Use migration scripts for production changes
-4. Monitor performance metrics after changes
-
----
-
-*This production schema provides enterprise-grade performance and reliability for the Daily Profit Model system.*

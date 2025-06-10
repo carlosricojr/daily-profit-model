@@ -1,11 +1,17 @@
--- Prop Trading Model Database Schema - Unified Version
--- Combines best features from all schema versions:
--- - Complete table definitions from baseline
--- - Partitioning and performance features from advanced version
--- - Comprehensive feature columns for ML pipeline
+-- Daily Profit Model Database Schema - Consolidated Version
+-- This is a single, unified schema file for early development stage
+-- Includes all tables, indexes, functions, and materialized views
+-- No separate migrations needed - drop and recreate for testing
+
+-- ========================================
+-- Schema Setup
+-- ========================================
+
+-- Drop schema if exists (for clean testing)
+DROP SCHEMA IF EXISTS prop_trading_model CASCADE;
 
 -- Create the dedicated schema for the model
-CREATE SCHEMA IF NOT EXISTS prop_trading_model;
+CREATE SCHEMA prop_trading_model;
 
 -- Set the search path to our schema
 SET search_path TO prop_trading_model;
@@ -18,20 +24,11 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 CREATE EXTENSION IF NOT EXISTS btree_gist;  -- For exclusion constraints
 
 -- ========================================
--- Migration Versioning Table (Alembic-style)
--- ========================================
-
-CREATE TABLE IF NOT EXISTS alembic_version (
-    version_num VARCHAR(32) NOT NULL,
-    CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
-);
-
--- ========================================
 -- Raw Data Tables (Data Ingestion Layer)
 -- ========================================
 
 -- Raw accounts data from /accounts API
-CREATE TABLE IF NOT EXISTS raw_accounts_data (
+CREATE TABLE raw_accounts_data (
     id SERIAL PRIMARY KEY,
     account_id VARCHAR(255) NOT NULL,
     login VARCHAR(255) NOT NULL,
@@ -57,17 +54,17 @@ CREATE TABLE IF NOT EXISTS raw_accounts_data (
 );
 
 -- Indexes for raw_accounts_data
-CREATE INDEX IF NOT EXISTS idx_raw_accounts_account_id ON raw_accounts_data(account_id);
-CREATE INDEX IF NOT EXISTS idx_raw_accounts_login ON raw_accounts_data(login);
-CREATE INDEX IF NOT EXISTS idx_raw_accounts_trader_id ON raw_accounts_data(trader_id) WHERE trader_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_raw_accounts_plan_id ON raw_accounts_data(plan_id) WHERE plan_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_raw_accounts_ingestion ON raw_accounts_data(ingestion_timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_raw_accounts_status ON raw_accounts_data(status) WHERE status = 'Active';
-CREATE INDEX IF NOT EXISTS idx_raw_accounts_phase ON raw_accounts_data(phase);
-CREATE INDEX IF NOT EXISTS idx_raw_accounts_updated ON raw_accounts_data(updated_at DESC) WHERE updated_at IS NOT NULL;
+CREATE INDEX idx_raw_accounts_account_id ON raw_accounts_data(account_id);
+CREATE INDEX idx_raw_accounts_login ON raw_accounts_data(login);
+CREATE INDEX idx_raw_accounts_trader_id ON raw_accounts_data(trader_id) WHERE trader_id IS NOT NULL;
+CREATE INDEX idx_raw_accounts_plan_id ON raw_accounts_data(plan_id) WHERE plan_id IS NOT NULL;
+CREATE INDEX idx_raw_accounts_ingestion ON raw_accounts_data(ingestion_timestamp DESC);
+CREATE INDEX idx_raw_accounts_status ON raw_accounts_data(status) WHERE status = 'Active';
+CREATE INDEX idx_raw_accounts_phase ON raw_accounts_data(phase);
+CREATE INDEX idx_raw_accounts_updated ON raw_accounts_data(updated_at DESC) WHERE updated_at IS NOT NULL;
 
 -- Raw metrics alltime data from /metrics/alltime API
-CREATE TABLE IF NOT EXISTS raw_metrics_alltime (
+CREATE TABLE raw_metrics_alltime (
     id SERIAL PRIMARY KEY,
     account_id VARCHAR(255) NOT NULL,
     login VARCHAR(255) NOT NULL,
@@ -93,16 +90,18 @@ CREATE TABLE IF NOT EXISTS raw_metrics_alltime (
 );
 
 -- Indexes for raw_metrics_alltime
-CREATE INDEX IF NOT EXISTS idx_raw_metrics_alltime_account_id ON raw_metrics_alltime(account_id);
-CREATE INDEX IF NOT EXISTS idx_raw_metrics_alltime_login ON raw_metrics_alltime(login);
+CREATE INDEX idx_raw_metrics_alltime_account_id ON raw_metrics_alltime(account_id);
+CREATE INDEX idx_raw_metrics_alltime_login ON raw_metrics_alltime(login);
+CREATE INDEX idx_raw_metrics_alltime_ingestion ON raw_metrics_alltime(ingestion_timestamp DESC);
+CREATE INDEX idx_raw_metrics_alltime_profit ON raw_metrics_alltime(net_profit DESC) WHERE net_profit IS NOT NULL;
 
 -- Raw metrics daily - PARTITIONED BY RANGE (date) for performance
-CREATE TABLE IF NOT EXISTS raw_metrics_daily (
-    id SERIAL,
+CREATE TABLE raw_metrics_daily (
+    id BIGSERIAL,
     account_id VARCHAR(255) NOT NULL,
     login VARCHAR(255) NOT NULL,
-    date DATE NOT NULL,  -- Partition key
-    net_profit DECIMAL(18, 2), -- This is our target variable
+    date DATE NOT NULL,
+    net_profit DECIMAL(18, 2),
     gross_profit DECIMAL(18, 2) CHECK (gross_profit >= 0),
     gross_loss DECIMAL(18, 2) CHECK (gross_loss <= 0),
     total_trades INTEGER CHECK (total_trades >= 0),
@@ -110,8 +109,8 @@ CREATE TABLE IF NOT EXISTS raw_metrics_daily (
     losing_trades INTEGER CHECK (losing_trades >= 0),
     win_rate DECIMAL(5, 2) CHECK (win_rate >= 0 AND win_rate <= 100),
     profit_factor DECIMAL(10, 2) CHECK (profit_factor >= 0),
-    lots_traded DECIMAL(18, 4) CHECK (lots_traded >= 0),
-    volume_traded DECIMAL(18, 2) CHECK (volume_traded >= 0),
+    lots_traded DECIMAL(18, 4),
+    volume_traded DECIMAL(20, 2),
     commission DECIMAL(18, 2),
     swap DECIMAL(18, 2),
     balance_start DECIMAL(18, 2),
@@ -120,39 +119,43 @@ CREATE TABLE IF NOT EXISTS raw_metrics_daily (
     equity_end DECIMAL(18, 2),
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500),
-    CONSTRAINT chk_daily_trades_consistency CHECK (total_trades = winning_trades + losing_trades),
-    PRIMARY KEY (id, date),
-    UNIQUE(account_id, date, ingestion_timestamp)
+    PRIMARY KEY (account_id, date, ingestion_timestamp)
 ) PARTITION BY RANGE (date);
 
--- Create yearly partitions for metrics
+-- Create partitions for raw_metrics_daily (last 3 years + future)
 DO $$
 DECLARE
-    year INTEGER;
+    start_date date := '2022-01-01';
+    partition_date date;
+    partition_name text;
 BEGIN
-    FOR year IN 2022..2026 LOOP
-        EXECUTE format('
-            CREATE TABLE IF NOT EXISTS raw_metrics_daily_%s PARTITION OF raw_metrics_daily
-            FOR VALUES FROM (%L) TO (%L)',
-            year,
-            year || '-01-01',
-            (year + 1) || '-01-01'
-        );
+    FOR partition_date IN 
+        SELECT generate_series(
+            start_date,
+            CURRENT_DATE + interval '3 months',
+            interval '1 month'
+        )::date
+    LOOP
+        partition_name := 'raw_metrics_daily_' || to_char(partition_date, 'YYYY_MM');
         
-        -- Create indexes on each partition
         EXECUTE format('
-            CREATE INDEX IF NOT EXISTS idx_raw_metrics_daily_%s_account_id ON raw_metrics_daily_%s (account_id);
-            CREATE INDEX IF NOT EXISTS idx_raw_metrics_daily_%s_date ON raw_metrics_daily_%s (date DESC);
-            CREATE INDEX IF NOT EXISTS idx_raw_metrics_daily_%s_account_date ON raw_metrics_daily_%s (account_id, date DESC);',
-            year, year,
-            year, year,
-            year, year
+            CREATE TABLE IF NOT EXISTS %I PARTITION OF raw_metrics_daily
+            FOR VALUES FROM (%L) TO (%L)',
+            partition_name,
+            partition_date,
+            partition_date + interval '1 month'
         );
     END LOOP;
 END $$;
 
--- Raw metrics hourly data from /metrics/hourly API
-CREATE TABLE IF NOT EXISTS raw_metrics_hourly (
+-- Indexes for raw_metrics_daily
+CREATE INDEX idx_raw_metrics_daily_account_date ON raw_metrics_daily(account_id, date DESC);
+CREATE INDEX idx_raw_metrics_daily_date ON raw_metrics_daily(date DESC);
+CREATE INDEX idx_raw_metrics_daily_login ON raw_metrics_daily(login);
+CREATE INDEX idx_raw_metrics_daily_profit ON raw_metrics_daily(date DESC, net_profit DESC) WHERE net_profit IS NOT NULL;
+
+-- Raw metrics hourly
+CREATE TABLE raw_metrics_hourly (
     id SERIAL PRIMARY KEY,
     account_id VARCHAR(255) NOT NULL,
     login VARCHAR(255) NOT NULL,
@@ -165,55 +168,60 @@ CREATE TABLE IF NOT EXISTS raw_metrics_hourly (
     winning_trades INTEGER CHECK (winning_trades >= 0),
     losing_trades INTEGER CHECK (losing_trades >= 0),
     win_rate DECIMAL(5, 2) CHECK (win_rate >= 0 AND win_rate <= 100),
-    lots_traded DECIMAL(18, 4) CHECK (lots_traded >= 0),
-    volume_traded DECIMAL(18, 2) CHECK (volume_traded >= 0),
+    lots_traded DECIMAL(18, 4),
+    volume_traded DECIMAL(20, 2),
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500),
     UNIQUE(account_id, date, hour, ingestion_timestamp)
 );
 
 -- Indexes for raw_metrics_hourly
-CREATE INDEX IF NOT EXISTS idx_raw_metrics_hourly_account_id ON raw_metrics_hourly(account_id);
-CREATE INDEX IF NOT EXISTS idx_raw_metrics_hourly_date_hour ON raw_metrics_hourly(date, hour);
+CREATE INDEX idx_raw_metrics_hourly_account_date ON raw_metrics_hourly(account_id, date DESC, hour);
+CREATE INDEX idx_raw_metrics_hourly_date_hour ON raw_metrics_hourly(date DESC, hour);
 
--- Raw trades closed - PARTITIONED BY RANGE (trade_date) for 81M records
-CREATE TABLE IF NOT EXISTS raw_trades_closed (
+-- Raw trades closed - PARTITIONED BY RANGE (trade_date)
+CREATE TABLE raw_trades_closed (
     id BIGSERIAL,
-    trade_id VARCHAR(255) NOT NULL,
-    account_id VARCHAR(255) NOT NULL,
+    account_id VARCHAR(255), -- Nullable to handle cases where we only have login initially
     login VARCHAR(255) NOT NULL,
-    symbol VARCHAR(50),
-    std_symbol VARCHAR(50),
+    trade_id VARCHAR(255) NOT NULL,
+    symbol VARCHAR(50) NOT NULL,
     side VARCHAR(10) CHECK (side IN ('buy', 'sell', 'BUY', 'SELL')),
     open_time TIMESTAMP,
     close_time TIMESTAMP,
-    trade_date DATE NOT NULL,  -- Partition key
-    open_price DECIMAL(18, 6) CHECK (open_price > 0),
-    close_price DECIMAL(18, 6) CHECK (close_price > 0),
-    stop_loss DECIMAL(18, 6),
-    take_profit DECIMAL(18, 6),
-    lots DECIMAL(18, 4) CHECK (lots > 0),
-    volume_usd DECIMAL(18, 2) CHECK (volume_usd >= 0),
+    open_price DECIMAL(18, 6),
+    close_price DECIMAL(18, 6),
+    lots DECIMAL(18, 4),
+    volume_usd DECIMAL(20, 2),
     profit DECIMAL(18, 2),
     commission DECIMAL(18, 2),
     swap DECIMAL(18, 2),
+    stop_loss DECIMAL(18, 6),
+    take_profit DECIMAL(18, 6),
+    trade_date DATE NOT NULL,
+    std_symbol VARCHAR(50),
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500),
-    CONSTRAINT chk_close_after_open CHECK (close_time >= open_time),
-    PRIMARY KEY (id, trade_date)  -- Include partition key in PK
+    PRIMARY KEY (trade_id, account_id, trade_date)
 ) PARTITION BY RANGE (trade_date);
 
--- Create monthly partitions for trades
+-- Add comment explaining the nullable account_id
+COMMENT ON COLUMN raw_trades_closed.account_id IS 'Account ID - may be temporarily set to login value until proper resolution with platform/mt_version is implemented';
+
+-- Create partitions for raw_trades_closed
 DO $$
 DECLARE
-    start_date DATE := '2023-01-01';
-    end_date DATE := CURRENT_DATE + INTERVAL '3 months';
-    partition_date DATE;
-    partition_name TEXT;
+    start_date date := '2022-01-01';
+    partition_date date;
+    partition_name text;
 BEGIN
-    partition_date := start_date;
-    
-    WHILE partition_date < end_date LOOP
+    FOR partition_date IN 
+        SELECT generate_series(
+            start_date,
+            CURRENT_DATE + interval '3 months',
+            interval '1 month'
+        )::date
+    LOOP
         partition_name := 'raw_trades_closed_' || to_char(partition_date, 'YYYY_MM');
         
         EXECUTE format('
@@ -221,497 +229,346 @@ BEGIN
             FOR VALUES FROM (%L) TO (%L)',
             partition_name,
             partition_date,
-            partition_date + INTERVAL '1 month'
+            partition_date + interval '1 month'
         );
-        
-        -- Create indexes on each partition
-        EXECUTE format('
-            CREATE INDEX IF NOT EXISTS %I ON %I (account_id);
-            CREATE INDEX IF NOT EXISTS %I ON %I (trade_date);
-            CREATE INDEX IF NOT EXISTS %I ON %I (account_id, trade_date);
-            CREATE INDEX IF NOT EXISTS %I ON %I (std_symbol) WHERE std_symbol IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS %I ON %I (profit) WHERE profit != 0;',
-            'idx_' || partition_name || '_account_id', partition_name,
-            'idx_' || partition_name || '_trade_date', partition_name,
-            'idx_' || partition_name || '_account_date', partition_name,
-            'idx_' || partition_name || '_symbol', partition_name,
-            'idx_' || partition_name || '_profit', partition_name
-        );
-        
-        partition_date := partition_date + INTERVAL '1 month';
     END LOOP;
 END $$;
 
--- Raw trades open data from /trades/open API
-CREATE TABLE IF NOT EXISTS raw_trades_open (
+-- Indexes for raw_trades_closed
+CREATE INDEX idx_raw_trades_closed_account_date ON raw_trades_closed(account_id, trade_date DESC);
+CREATE INDEX idx_raw_trades_closed_symbol ON raw_trades_closed(std_symbol, trade_date DESC) WHERE std_symbol IS NOT NULL;
+CREATE INDEX idx_raw_trades_closed_profit ON raw_trades_closed(profit DESC, trade_date DESC);
+CREATE INDEX idx_raw_trades_closed_trade_id ON raw_trades_closed(trade_id);
+CREATE INDEX idx_raw_trades_closed_login ON raw_trades_closed(login); -- For account_id resolution
+
+-- Raw trades open
+CREATE TABLE raw_trades_open (
     id SERIAL PRIMARY KEY,
-    trade_id VARCHAR(255) NOT NULL,
-    account_id VARCHAR(255) NOT NULL,
+    account_id VARCHAR(255), -- Nullable to handle cases where we only have login initially
     login VARCHAR(255) NOT NULL,
-    symbol VARCHAR(50),
-    std_symbol VARCHAR(50),
+    trade_id VARCHAR(255) NOT NULL,
+    symbol VARCHAR(50) NOT NULL,
     side VARCHAR(10) CHECK (side IN ('buy', 'sell', 'BUY', 'SELL')),
     open_time TIMESTAMP,
-    trade_date DATE,
-    open_price DECIMAL(18, 6) CHECK (open_price > 0),
-    current_price DECIMAL(18, 6) CHECK (current_price > 0),
+    open_price DECIMAL(18, 6),
+    current_price DECIMAL(18, 6),
+    lots DECIMAL(18, 4),
+    volume_usd DECIMAL(20, 2),
+    profit DECIMAL(18, 2),
     stop_loss DECIMAL(18, 6),
     take_profit DECIMAL(18, 6),
-    lots DECIMAL(18, 4) CHECK (lots > 0),
-    volume_usd DECIMAL(18, 2) CHECK (volume_usd >= 0),
-    unrealized_pnl DECIMAL(18, 2),
-    commission DECIMAL(18, 2),
-    swap DECIMAL(18, 2),
+    std_symbol VARCHAR(50),
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    source_api_endpoint VARCHAR(500)
+    source_api_endpoint VARCHAR(500),
+    UNIQUE(trade_id, account_id, ingestion_timestamp)
 );
+
+-- Add comment explaining the nullable account_id
+COMMENT ON COLUMN raw_trades_open.account_id IS 'Account ID - may be temporarily set to login value until proper resolution with platform/mt_version is implemented';
 
 -- Indexes for raw_trades_open
-CREATE INDEX IF NOT EXISTS idx_raw_trades_open_account_id ON raw_trades_open(account_id);
-CREATE INDEX IF NOT EXISTS idx_raw_trades_open_trade_date ON raw_trades_open(trade_date);
+CREATE INDEX idx_raw_trades_open_account_id ON raw_trades_open(account_id);
+CREATE INDEX idx_raw_trades_open_trade_id ON raw_trades_open(trade_id);
+CREATE INDEX idx_raw_trades_open_symbol ON raw_trades_open(std_symbol) WHERE std_symbol IS NOT NULL;
+CREATE INDEX idx_raw_trades_open_ingestion ON raw_trades_open(ingestion_timestamp DESC);
+CREATE INDEX idx_raw_trades_open_login ON raw_trades_open(login); -- For account_id resolution
 
--- Raw plans data from Plans CSV files
-CREATE TABLE IF NOT EXISTS raw_plans_data (
+-- Raw plans data
+CREATE TABLE raw_plans_data (
     id SERIAL PRIMARY KEY,
-    plan_id VARCHAR(255) NOT NULL UNIQUE,  -- UNIQUE for FK reference
-    plan_name VARCHAR(255),
-    plan_type VARCHAR(100),
+    plan_id VARCHAR(255) NOT NULL,
+    plan_name VARCHAR(255) NOT NULL,
     starting_balance DECIMAL(18, 2) CHECK (starting_balance > 0),
-    profit_target DECIMAL(18, 2) CHECK (profit_target >= 0),
-    profit_target_pct DECIMAL(5, 2) CHECK (profit_target_pct >= 0),
+    profit_target DECIMAL(18, 2),
+    profit_target_pct DECIMAL(5, 2) CHECK (profit_target_pct >= 0 AND profit_target_pct <= 100),
     max_drawdown DECIMAL(18, 2),
-    max_drawdown_pct DECIMAL(5, 2) CHECK (max_drawdown_pct >= 0),
+    max_drawdown_pct DECIMAL(5, 2) CHECK (max_drawdown_pct >= 0 AND max_drawdown_pct <= 100),
     max_daily_drawdown DECIMAL(18, 2),
-    max_daily_drawdown_pct DECIMAL(5, 2) CHECK (max_daily_drawdown_pct >= 0),
+    max_daily_drawdown_pct DECIMAL(5, 2) CHECK (max_daily_drawdown_pct >= 0 AND max_daily_drawdown_pct <= 100),
+    profit_share_pct DECIMAL(5, 2) CHECK (profit_share_pct >= 0 AND profit_share_pct <= 100),
     max_leverage DECIMAL(10, 2) CHECK (max_leverage > 0),
-    is_drawdown_relative BOOLEAN DEFAULT FALSE,
     min_trading_days INTEGER CHECK (min_trading_days >= 0),
-    max_trading_days INTEGER,
-    profit_split_pct DECIMAL(5, 2) CHECK (profit_split_pct >= 0 AND profit_split_pct <= 100),
-    liquidate_friday BOOLEAN DEFAULT FALSE,  -- Whether account can hold over weekend
-    inactivity_period INTEGER CHECK (inactivity_period >= 0),  -- Days before breach for inactivity
-    daily_drawdown_by_balance_equity BOOLEAN DEFAULT FALSE,  -- How daily drawdown is calculated
-    enable_consistency BOOLEAN DEFAULT FALSE,  -- Whether consistency rules apply
-    ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    source_file VARCHAR(500)
-);
-
--- Raw regimes daily data from Supabase public.regimes_daily
-CREATE TABLE IF NOT EXISTS raw_regimes_daily (
-    id SERIAL PRIMARY KEY,
-    date DATE NOT NULL,
-    market_news JSONB,
-    instruments JSONB,
-    country_economic_indicators JSONB,
-    news_analysis JSONB,
-    summary JSONB,
-    vector_daily_regime FLOAT[], -- Array of floats for the regime vector
+    max_trading_days INTEGER CHECK (max_trading_days >= 0),
+    is_drawdown_relative BOOLEAN DEFAULT FALSE,
+    liquidate_friday BOOLEAN DEFAULT FALSE,
+    inactivity_period INTEGER CHECK (inactivity_period >= 0),
+    daily_drawdown_by_balance_equity BOOLEAN DEFAULT FALSE,
+    enable_consistency BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP,
     updated_at TIMESTAMP,
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    source_api_endpoint VARCHAR(500),
+    UNIQUE(plan_id, ingestion_timestamp)
+);
+
+-- Indexes for raw_plans_data
+CREATE INDEX idx_raw_plans_plan_id ON raw_plans_data(plan_id);
+CREATE INDEX idx_raw_plans_name ON raw_plans_data(plan_name);
+
+-- Comments for plan columns
+COMMENT ON COLUMN raw_plans_data.liquidate_friday IS 'Whether account can hold positions over the weekend (TRUE = must liquidate, FALSE = can hold)';
+COMMENT ON COLUMN raw_plans_data.inactivity_period IS 'Number of days an account can go without placing a trade before breach';
+COMMENT ON COLUMN raw_plans_data.daily_drawdown_by_balance_equity IS 'How daily drawdown is calculated (TRUE = from previous day balance or equity whichever is higher, FALSE = from previous day balance only)';
+COMMENT ON COLUMN raw_plans_data.enable_consistency IS 'Whether consistency rules are applied to the account';
+
+-- Raw market regimes daily data
+CREATE TABLE raw_regimes_daily (
+    id SERIAL PRIMARY KEY,
+    date DATE NOT NULL,
+    regime_name VARCHAR(100),
+    summary JSONB,
+    ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    source_api_endpoint VARCHAR(500),
     UNIQUE(date, ingestion_timestamp)
 );
 
 -- Indexes for raw_regimes_daily
-CREATE INDEX IF NOT EXISTS idx_raw_regimes_daily_date ON raw_regimes_daily(date);
-CREATE INDEX IF NOT EXISTS idx_raw_regimes_daily_ingestion ON raw_regimes_daily(ingestion_timestamp);
+CREATE INDEX idx_raw_regimes_date ON raw_regimes_daily(date DESC);
+CREATE INDEX idx_raw_regimes_summary ON raw_regimes_daily USING gin(summary);
 
 -- ========================================
--- Staging Tables (Preprocessing Layer)
+-- Staging Tables (Data Processing Layer)
 -- ========================================
 
--- Staging table for daily account snapshots
-CREATE TABLE IF NOT EXISTS stg_accounts_daily_snapshots (
+-- Daily account snapshots for time-series analysis
+CREATE TABLE stg_accounts_daily_snapshots (
     id SERIAL PRIMARY KEY,
     account_id VARCHAR(255) NOT NULL,
+    snapshot_date DATE NOT NULL,
     login VARCHAR(255) NOT NULL,
-    date DATE NOT NULL,
     trader_id VARCHAR(255),
     plan_id VARCHAR(255),
     phase VARCHAR(50),
     status VARCHAR(50),
     starting_balance DECIMAL(18, 2),
-    current_balance DECIMAL(18, 2),
-    current_equity DECIMAL(18, 2),
+    balance DECIMAL(18, 2),
+    equity DECIMAL(18, 2),
+    profit_target DECIMAL(18, 2),
     profit_target_pct DECIMAL(5, 2),
+    max_daily_drawdown DECIMAL(18, 2),
     max_daily_drawdown_pct DECIMAL(5, 2),
+    max_drawdown DECIMAL(18, 2),
     max_drawdown_pct DECIMAL(5, 2),
-    max_leverage DECIMAL(10, 2),
     is_drawdown_relative BOOLEAN,
-    days_since_first_trade INTEGER,
-    active_trading_days_count INTEGER,
-    distance_to_profit_target DECIMAL(18, 2),
-    distance_to_max_drawdown DECIMAL(18, 2),
+    liquidate_friday BOOLEAN DEFAULT FALSE,
+    inactivity_period INTEGER,
+    daily_drawdown_by_balance_equity BOOLEAN DEFAULT FALSE,
+    enable_consistency BOOLEAN DEFAULT FALSE,
+    days_active INTEGER,
+    days_since_last_trade INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(account_id, date)
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(account_id, snapshot_date)
 );
 
--- Indexes for stg_accounts_daily_snapshots
-CREATE INDEX IF NOT EXISTS idx_stg_accounts_daily_account_id ON stg_accounts_daily_snapshots(account_id);
-CREATE INDEX IF NOT EXISTS idx_stg_accounts_daily_date ON stg_accounts_daily_snapshots(date);
-CREATE INDEX IF NOT EXISTS idx_stg_accounts_daily_account_date ON stg_accounts_daily_snapshots(account_id, date);
+-- Indexes for staging table
+CREATE INDEX idx_stg_accounts_daily_account_date ON stg_accounts_daily_snapshots(account_id, snapshot_date DESC);
+CREATE INDEX idx_stg_accounts_daily_date ON stg_accounts_daily_snapshots(snapshot_date DESC);
+CREATE INDEX idx_stg_accounts_daily_status ON stg_accounts_daily_snapshots(status) WHERE status = 'Active';
 
 -- ========================================
--- Feature Store Table
+-- Feature Store (ML Layer)
 -- ========================================
 
--- Feature store for account daily features (features for day D to predict D+1)
-CREATE TABLE IF NOT EXISTS feature_store_account_daily (
+-- Feature store for account daily features
+CREATE TABLE feature_store_account_daily (
     id SERIAL PRIMARY KEY,
     account_id VARCHAR(255) NOT NULL,
-    login VARCHAR(255) NOT NULL,
-    feature_date DATE NOT NULL, -- Date D (features are for this date)
+    feature_date DATE NOT NULL,
     
-    -- Static Account & Plan Features
-    starting_balance DECIMAL(18, 2),
-    max_daily_drawdown_pct DECIMAL(5, 2),
-    max_drawdown_pct DECIMAL(5, 2),
-    profit_target_pct DECIMAL(5, 2),
-    max_leverage DECIMAL(10, 2),
-    is_drawdown_relative INTEGER,
+    -- Basic account features
+    days_active INTEGER,
+    current_phase VARCHAR(50),
+    account_age_days INTEGER,
     
-    -- Dynamic Account State Features (as of EOD D)
-    current_balance DECIMAL(18, 2),
-    current_equity DECIMAL(18, 2),
-    days_since_first_trade INTEGER,
-    active_trading_days_count INTEGER,
+    -- Trading activity features
+    trades_today INTEGER DEFAULT 0,
+    trades_last_7d INTEGER DEFAULT 0,
+    trades_last_30d INTEGER DEFAULT 0,
+    trading_days_last_7d INTEGER DEFAULT 0,
+    trading_days_last_30d INTEGER DEFAULT 0,
+    avg_trades_per_day_7d DECIMAL(10, 4),
+    avg_trades_per_day_30d DECIMAL(10, 4),
+    
+    -- Performance features
+    profit_today DECIMAL(18, 2),
+    profit_last_7d DECIMAL(18, 2),
+    profit_last_30d DECIMAL(18, 2),
+    roi_today DECIMAL(10, 4),
+    roi_last_7d DECIMAL(10, 4),
+    roi_last_30d DECIMAL(10, 4),
+    
+    -- Risk features
+    win_rate_today DECIMAL(5, 2),
+    win_rate_7d DECIMAL(5, 2),
+    win_rate_30d DECIMAL(5, 2),
+    profit_factor_7d DECIMAL(10, 2),
+    profit_factor_30d DECIMAL(10, 2),
+    max_drawdown_7d DECIMAL(18, 2),
+    max_drawdown_30d DECIMAL(18, 2),
+    current_drawdown DECIMAL(18, 2),
+    current_drawdown_pct DECIMAL(5, 2),
+    
+    -- Trading behavior features
+    avg_trade_size_7d DECIMAL(18, 4),
+    avg_trade_size_30d DECIMAL(18, 4),
+    avg_holding_time_hours_7d DECIMAL(10, 2),
+    avg_holding_time_hours_30d DECIMAL(10, 2),
+    
+    -- Symbol diversification
+    unique_symbols_7d INTEGER,
+    unique_symbols_30d INTEGER,
+    symbol_concentration_7d DECIMAL(5, 2),
+    symbol_concentration_30d DECIMAL(5, 2),
+    
+    -- Time pattern features
+    pct_trades_market_hours_7d DECIMAL(5, 2),
+    pct_trades_market_hours_30d DECIMAL(5, 2),
+    favorite_trading_hour_7d INTEGER,
+    favorite_trading_hour_30d INTEGER,
+    
+    -- Consistency features
+    daily_profit_volatility_7d DECIMAL(18, 2),
+    daily_profit_volatility_30d DECIMAL(18, 2),
+    profitable_days_pct_7d DECIMAL(5, 2),
+    profitable_days_pct_30d DECIMAL(5, 2),
+    
+    -- Plan compliance features
     distance_to_profit_target DECIMAL(18, 2),
-    distance_to_max_drawdown DECIMAL(18, 2),
-    open_pnl DECIMAL(18, 2),
-    open_positions_volume DECIMAL(18, 2),
+    distance_to_profit_target_pct DECIMAL(5, 2),
+    distance_to_drawdown_limit DECIMAL(18, 2),
+    distance_to_drawdown_limit_pct DECIMAL(5, 2),
+    days_until_deadline INTEGER,
     
-    -- Historical Performance Features (Rolling Windows)
-    -- 1-day window
-    rolling_pnl_sum_1d DECIMAL(18, 2),
-    rolling_pnl_avg_1d DECIMAL(18, 2),
-    rolling_pnl_std_1d DECIMAL(18, 2),
-    
-    -- 3-day window
-    rolling_pnl_sum_3d DECIMAL(18, 2),
-    rolling_pnl_avg_3d DECIMAL(18, 2),
-    rolling_pnl_std_3d DECIMAL(18, 2),
-    rolling_pnl_min_3d DECIMAL(18, 2),
-    rolling_pnl_max_3d DECIMAL(18, 2),
-    win_rate_3d DECIMAL(5, 2),
-    
-    -- 5-day window
-    rolling_pnl_sum_5d DECIMAL(18, 2),
-    rolling_pnl_avg_5d DECIMAL(18, 2),
-    rolling_pnl_std_5d DECIMAL(18, 2),
-    rolling_pnl_min_5d DECIMAL(18, 2),
-    rolling_pnl_max_5d DECIMAL(18, 2),
-    win_rate_5d DECIMAL(5, 2),
-    profit_factor_5d DECIMAL(10, 2),
-    sharpe_ratio_5d DECIMAL(10, 2),
-    
-    -- 10-day window
-    rolling_pnl_sum_10d DECIMAL(18, 2),
-    rolling_pnl_avg_10d DECIMAL(18, 2),
-    rolling_pnl_std_10d DECIMAL(18, 2),
-    rolling_pnl_min_10d DECIMAL(18, 2),
-    rolling_pnl_max_10d DECIMAL(18, 2),
-    win_rate_10d DECIMAL(5, 2),
-    profit_factor_10d DECIMAL(10, 2),
-    sharpe_ratio_10d DECIMAL(10, 2),
-    
-    -- 20-day window
-    rolling_pnl_sum_20d DECIMAL(18, 2),
-    rolling_pnl_avg_20d DECIMAL(18, 2),
-    rolling_pnl_std_20d DECIMAL(18, 2),
-    win_rate_20d DECIMAL(5, 2),
-    profit_factor_20d DECIMAL(10, 2),
-    sharpe_ratio_20d DECIMAL(10, 2),
-    
-    -- Behavioral Features
-    trades_count_5d INTEGER,
-    avg_trade_duration_5d DECIMAL(10, 2),
-    avg_lots_per_trade_5d DECIMAL(18, 4),
-    avg_volume_per_trade_5d DECIMAL(18, 2),
-    stop_loss_usage_rate_5d DECIMAL(5, 2),
-    take_profit_usage_rate_5d DECIMAL(5, 2),
-    buy_sell_ratio_5d DECIMAL(5, 2),
-    top_symbol_concentration_5d DECIMAL(5, 2),
-    
-    -- Market Regime Features (from regimes_daily for day D)
-    market_sentiment_score DECIMAL(10, 4),
+    -- Market regime features
     market_volatility_regime VARCHAR(50),
-    market_liquidity_state VARCHAR(50),
-    vix_level DECIMAL(10, 2),
-    dxy_level DECIMAL(10, 2),
-    sp500_daily_return DECIMAL(10, 4),
-    btc_volatility_90d DECIMAL(10, 4),
-    fed_funds_rate DECIMAL(10, 4),
+    market_trend_regime VARCHAR(50),
     
-    -- Date and Time Features
-    day_of_week INTEGER,
-    week_of_month INTEGER,
-    month INTEGER,
-    quarter INTEGER,
-    day_of_year INTEGER,
-    is_month_start BOOLEAN,
-    is_month_end BOOLEAN,
-    is_quarter_start BOOLEAN,
-    is_quarter_end BOOLEAN,
+    -- Target variable
+    will_profit_next_day BOOLEAN,
+    next_day_profit DECIMAL(18, 2),
     
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(account_id, feature_date)
 );
 
--- Indexes for feature_store_account_daily
-CREATE INDEX IF NOT EXISTS idx_feature_store_account_id ON feature_store_account_daily(account_id);
-CREATE INDEX IF NOT EXISTS idx_feature_store_date ON feature_store_account_daily(feature_date);
-CREATE INDEX IF NOT EXISTS idx_feature_store_account_date ON feature_store_account_daily(account_id, feature_date);
+-- Indexes for feature store
+CREATE INDEX idx_feature_store_account_date ON feature_store_account_daily(account_id, feature_date DESC);
+CREATE INDEX idx_feature_store_date ON feature_store_account_daily(feature_date DESC);
+CREATE INDEX idx_feature_store_profit_target ON feature_store_account_daily(will_profit_next_day, feature_date DESC);
 
 -- ========================================
--- Model Training and Prediction Tables
+-- Model Management Tables
 -- ========================================
 
--- Model training input table (features from day D, target from day D+1)
-CREATE TABLE IF NOT EXISTS model_training_input (
+-- Model training input tracking
+CREATE TABLE model_training_input (
     id SERIAL PRIMARY KEY,
-    login VARCHAR(255) NOT NULL,
-    prediction_date DATE NOT NULL, -- Date D+1 (date we're predicting for)
-    feature_date DATE NOT NULL, -- Date D (date features are from)
-    
-    -- All features from feature_store_account_daily
-    -- (These are duplicated here for training convenience)
-    starting_balance DECIMAL(18, 2),
-    max_daily_drawdown_pct DECIMAL(5, 2),
-    max_drawdown_pct DECIMAL(5, 2),
-    profit_target_pct DECIMAL(5, 2),
-    max_leverage DECIMAL(10, 2),
-    is_drawdown_relative INTEGER,
-    current_balance DECIMAL(18, 2),
-    current_equity DECIMAL(18, 2),
-    days_since_first_trade INTEGER,
-    active_trading_days_count INTEGER,
-    distance_to_profit_target DECIMAL(18, 2),
-    distance_to_max_drawdown DECIMAL(18, 2),
-    open_pnl DECIMAL(18, 2),
-    open_positions_volume DECIMAL(18, 2),
-    rolling_pnl_sum_1d DECIMAL(18, 2),
-    rolling_pnl_avg_1d DECIMAL(18, 2),
-    rolling_pnl_std_1d DECIMAL(18, 2),
-    rolling_pnl_sum_3d DECIMAL(18, 2),
-    rolling_pnl_avg_3d DECIMAL(18, 2),
-    rolling_pnl_std_3d DECIMAL(18, 2),
-    rolling_pnl_min_3d DECIMAL(18, 2),
-    rolling_pnl_max_3d DECIMAL(18, 2),
-    win_rate_3d DECIMAL(5, 2),
-    rolling_pnl_sum_5d DECIMAL(18, 2),
-    rolling_pnl_avg_5d DECIMAL(18, 2),
-    rolling_pnl_std_5d DECIMAL(18, 2),
-    rolling_pnl_min_5d DECIMAL(18, 2),
-    rolling_pnl_max_5d DECIMAL(18, 2),
-    win_rate_5d DECIMAL(5, 2),
-    profit_factor_5d DECIMAL(10, 2),
-    sharpe_ratio_5d DECIMAL(10, 2),
-    rolling_pnl_sum_10d DECIMAL(18, 2),
-    rolling_pnl_avg_10d DECIMAL(18, 2),
-    rolling_pnl_std_10d DECIMAL(18, 2),
-    rolling_pnl_min_10d DECIMAL(18, 2),
-    rolling_pnl_max_10d DECIMAL(18, 2),
-    win_rate_10d DECIMAL(5, 2),
-    profit_factor_10d DECIMAL(10, 2),
-    sharpe_ratio_10d DECIMAL(10, 2),
-    rolling_pnl_sum_20d DECIMAL(18, 2),
-    rolling_pnl_avg_20d DECIMAL(18, 2),
-    rolling_pnl_std_20d DECIMAL(18, 2),
-    win_rate_20d DECIMAL(5, 2),
-    profit_factor_20d DECIMAL(10, 2),
-    sharpe_ratio_20d DECIMAL(10, 2),
-    trades_count_5d INTEGER,
-    avg_trade_duration_5d DECIMAL(10, 2),
-    avg_lots_per_trade_5d DECIMAL(18, 4),
-    avg_volume_per_trade_5d DECIMAL(18, 2),
-    stop_loss_usage_rate_5d DECIMAL(5, 2),
-    take_profit_usage_rate_5d DECIMAL(5, 2),
-    buy_sell_ratio_5d DECIMAL(5, 2),
-    top_symbol_concentration_5d DECIMAL(5, 2),
-    market_sentiment_score DECIMAL(10, 4),
-    market_volatility_regime VARCHAR(50),
-    market_liquidity_state VARCHAR(50),
-    vix_level DECIMAL(10, 2),
-    dxy_level DECIMAL(10, 2),
-    sp500_daily_return DECIMAL(10, 4),
-    btc_volatility_90d DECIMAL(10, 4),
-    fed_funds_rate DECIMAL(10, 4),
-    day_of_week INTEGER,
-    week_of_month INTEGER,
-    month INTEGER,
-    quarter INTEGER,
-    day_of_year INTEGER,
-    is_month_start BOOLEAN,
-    is_month_end BOOLEAN,
-    is_quarter_start BOOLEAN,
-    is_quarter_end BOOLEAN,
-    
-    -- Target variable (from raw_metrics_daily for prediction_date)
-    target_net_profit DECIMAL(18, 2),
-    
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(login, prediction_date)
-);
-
--- Indexes for model_training_input
-CREATE INDEX IF NOT EXISTS idx_model_training_login ON model_training_input(login);
-CREATE INDEX IF NOT EXISTS idx_model_training_prediction_date ON model_training_input(prediction_date);
-CREATE INDEX IF NOT EXISTS idx_model_training_feature_date ON model_training_input(feature_date);
-
--- Model predictions table
-CREATE TABLE IF NOT EXISTS model_predictions (
-    id SERIAL PRIMARY KEY,
-    login VARCHAR(255) NOT NULL,
-    prediction_date DATE NOT NULL, -- Date D+1 (date we're predicting for)
-    feature_date DATE NOT NULL, -- Date D (date features are from)
-    predicted_net_profit DECIMAL(18, 2),
-    prediction_confidence DECIMAL(5, 2),
-    model_version VARCHAR(50),
-    
-    -- SHAP values for top features (store as JSONB for flexibility)
-    shap_values JSONB,
-    top_positive_features JSONB,
-    top_negative_features JSONB,
-    
-    -- Actual outcome (filled in later for evaluation)
-    actual_net_profit DECIMAL(18, 2),
-    prediction_error DECIMAL(18, 2),
-    
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(login, prediction_date, model_version)
-);
-
--- Indexes for model_predictions
-CREATE INDEX IF NOT EXISTS idx_model_predictions_login ON model_predictions(login);
-CREATE INDEX IF NOT EXISTS idx_model_predictions_date ON model_predictions(prediction_date);
-CREATE INDEX IF NOT EXISTS idx_model_predictions_login_date ON model_predictions(login, prediction_date);
-
--- ========================================
--- Model Metadata and Versioning
--- ========================================
-
--- Model registry table
-CREATE TABLE IF NOT EXISTS model_registry (
-    id SERIAL PRIMARY KEY,
-    model_version VARCHAR(50) NOT NULL UNIQUE,
-    model_type VARCHAR(50) DEFAULT 'LightGBM',
-    training_start_date DATE,
-    training_end_date DATE,
-    validation_start_date DATE,
-    validation_end_date DATE,
-    test_start_date DATE,
-    test_end_date DATE,
-    
-    -- Model performance metrics
-    train_mae DECIMAL(18, 4),
-    train_rmse DECIMAL(18, 4),
-    train_r2 DECIMAL(5, 4),
-    val_mae DECIMAL(18, 4),
-    val_rmse DECIMAL(18, 4),
-    val_r2 DECIMAL(5, 4),
-    test_mae DECIMAL(18, 4),
-    test_rmse DECIMAL(18, 4),
-    test_r2 DECIMAL(5, 4),
-    
-    -- Model parameters (stored as JSONB)
+    model_version VARCHAR(100) NOT NULL,
+    training_date DATE NOT NULL,
+    feature_start_date DATE NOT NULL,
+    feature_end_date DATE NOT NULL,
+    total_samples INTEGER,
+    positive_samples INTEGER,
+    negative_samples INTEGER,
+    feature_columns TEXT[],
     hyperparameters JSONB,
-    feature_list JSONB,
-    feature_importance JSONB,
-    
-    -- Model artifacts location
-    model_file_path VARCHAR(500),
-    scaler_file_path VARCHAR(500),
-    
-    is_active BOOLEAN DEFAULT FALSE,
+    validation_metrics JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    UNIQUE(model_version, training_date)
 );
 
--- Create update trigger for model_registry
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
+-- Model predictions tracking
+CREATE TABLE model_predictions (
+    id SERIAL PRIMARY KEY,
+    model_version VARCHAR(100) NOT NULL,
+    prediction_date DATE NOT NULL,
+    account_id VARCHAR(255) NOT NULL,
+    predicted_profit_probability DECIMAL(5, 4),
+    predicted_profit_amount DECIMAL(18, 2),
+    feature_importance JSONB,
+    prediction_confidence DECIMAL(5, 4),
+    actual_profit DECIMAL(18, 2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(model_version, prediction_date, account_id)
+);
 
-DROP TRIGGER IF EXISTS update_model_registry_updated_at ON model_registry;
-CREATE TRIGGER update_model_registry_updated_at BEFORE UPDATE
-    ON model_registry FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- Indexes for model predictions
+CREATE INDEX idx_model_predictions_date ON model_predictions(prediction_date DESC);
+CREATE INDEX idx_model_predictions_account ON model_predictions(account_id, prediction_date DESC);
+
+-- Model registry
+CREATE TABLE model_registry (
+    id SERIAL PRIMARY KEY,
+    model_version VARCHAR(100) NOT NULL UNIQUE,
+    model_type VARCHAR(50) NOT NULL,
+    training_completed_at TIMESTAMP NOT NULL,
+    model_path VARCHAR(500),
+    git_commit_hash VARCHAR(100),
+    performance_metrics JSONB,
+    feature_importance JSONB,
+    is_active BOOLEAN DEFAULT FALSE,
+    deployed_at TIMESTAMP,
+    deprecated_at TIMESTAMP,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
 -- ========================================
--- Audit and Logging Tables
+-- Operational Tables
 -- ========================================
 
--- Pipeline execution log
-CREATE TABLE IF NOT EXISTS pipeline_execution_log (
+-- Pipeline execution logging
+CREATE TABLE pipeline_execution_log (
     id SERIAL PRIMARY KEY,
     pipeline_stage VARCHAR(100) NOT NULL,
     execution_date DATE NOT NULL,
     start_time TIMESTAMP NOT NULL,
     end_time TIMESTAMP,
-    status VARCHAR(50) NOT NULL, -- 'running', 'success', 'failed'
+    status VARCHAR(50) CHECK (status IN ('running', 'success', 'failed', 'warning')),
     records_processed INTEGER,
+    records_failed INTEGER,
     error_message TEXT,
     execution_details JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Indexes for pipeline_execution_log
-CREATE INDEX IF NOT EXISTS idx_pipeline_log_stage ON pipeline_execution_log(pipeline_stage);
-CREATE INDEX IF NOT EXISTS idx_pipeline_log_date ON pipeline_execution_log(execution_date);
-CREATE INDEX IF NOT EXISTS idx_pipeline_log_status ON pipeline_execution_log(status);
+-- Indexes for pipeline execution log
+CREATE INDEX idx_pipeline_execution_stage_date ON pipeline_execution_log(pipeline_stage, execution_date DESC);
+CREATE INDEX idx_pipeline_execution_status ON pipeline_execution_log(status, created_at DESC);
 
--- ========================================
--- Performance Monitoring Tables
--- ========================================
-
-CREATE TABLE IF NOT EXISTS query_performance_log (
+-- Query performance monitoring
+CREATE TABLE query_performance_log (
     id SERIAL PRIMARY KEY,
-    query_fingerprint TEXT,
-    query_text TEXT,
-    mean_time_ms DECIMAL(10, 2),
-    calls BIGINT,
-    total_time_ms DECIMAL(10, 2),
-    min_time_ms DECIMAL(10, 2),
-    max_time_ms DECIMAL(10, 2),
-    stddev_time_ms DECIMAL(10, 2),
-    logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_query_performance_fingerprint ON query_performance_log(query_fingerprint);
-CREATE INDEX IF NOT EXISTS idx_query_performance_logged_at ON query_performance_log(logged_at DESC);
-
--- ========================================
--- Scheduled Jobs Setup (using pg_cron or similar)
--- ========================================
-
-CREATE TABLE IF NOT EXISTS scheduled_jobs (
-    job_id SERIAL PRIMARY KEY,
-    job_name VARCHAR(100) NOT NULL UNIQUE,
-    schedule VARCHAR(100) NOT NULL,  -- cron expression
-    command TEXT NOT NULL,
-    is_active BOOLEAN DEFAULT TRUE,
-    last_run TIMESTAMP,
-    next_run TIMESTAMP,
+    query_hash VARCHAR(64),
+    query_template TEXT,
+    execution_time_ms DECIMAL(10, 2),
+    rows_returned INTEGER,
+    table_names TEXT[],
+    index_used BOOLEAN,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Insert maintenance job definitions
-INSERT INTO scheduled_jobs (job_name, schedule, command) VALUES
-    ('create_partitions', '0 0 25 * *', 'SELECT prop_trading_model.create_monthly_partitions();'),
-    ('refresh_mv_hourly', '0 * * * *', 'SELECT prop_trading_model.refresh_materialized_views();'),
-    ('update_statistics', '0 2 * * *', 'SELECT prop_trading_model.update_table_statistics();'),
-    ('vacuum_analyze', '0 3 * * 0', 'SELECT prop_trading_model.vacuum_tables();')
-ON CONFLICT (job_name) DO NOTHING;
+-- Scheduled jobs tracking
+CREATE TABLE scheduled_jobs (
+    job_name VARCHAR(100) PRIMARY KEY,
+    schedule VARCHAR(100) NOT NULL,
+    last_run TIMESTAMP,
+    next_run TIMESTAMP,
+    status VARCHAR(50),
+    error_count INTEGER DEFAULT 0,
+    command TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
 -- ========================================
--- Materialized Views for Common Aggregations
+-- Materialized Views
 -- ========================================
 
--- Account performance summary (refreshed daily)
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_account_performance_summary AS
+-- Account Performance Summary
+CREATE MATERIALIZED VIEW mv_account_performance_summary AS
 SELECT 
     a.account_id,
     a.login,
@@ -725,15 +582,42 @@ SELECT
     p.plan_name,
     p.profit_target_pct,
     p.max_drawdown_pct,
+    p.max_daily_drawdown_pct,
+    p.max_leverage,
+    p.min_trading_days,
+    p.max_trading_days,
+    -- Lifetime metrics
     COALESCE(m.total_trades, 0) as lifetime_trades,
     COALESCE(m.net_profit, 0) as lifetime_profit,
+    COALESCE(m.gross_profit, 0) as lifetime_gross_profit,
+    COALESCE(m.gross_loss, 0) as lifetime_gross_loss,
     COALESCE(m.win_rate, 0) as lifetime_win_rate,
     COALESCE(m.profit_factor, 0) as lifetime_profit_factor,
     COALESCE(m.sharpe_ratio, 0) as lifetime_sharpe_ratio,
+    COALESCE(m.sortino_ratio, 0) as lifetime_sortino_ratio,
+    COALESCE(m.max_drawdown_pct, 0) as lifetime_max_drawdown_pct,
+    -- Recent performance (30 days)
     COALESCE(daily.trades_last_30d, 0) as trades_last_30d,
     COALESCE(daily.profit_last_30d, 0) as profit_last_30d,
     COALESCE(daily.win_rate_last_30d, 0) as win_rate_last_30d,
-    a.updated_at as last_updated
+    COALESCE(daily.trading_days_last_30d, 0) as trading_days_last_30d,
+    -- Recent performance (7 days)
+    COALESCE(weekly.trades_last_7d, 0) as trades_last_7d,
+    COALESCE(weekly.profit_last_7d, 0) as profit_last_7d,
+    COALESCE(weekly.win_rate_last_7d, 0) as win_rate_last_7d,
+    -- Account health metrics
+    CASE 
+        WHEN a.starting_balance > 0 
+        THEN ((a.current_balance - a.starting_balance) / a.starting_balance * 100)
+        ELSE 0 
+    END as total_return_pct,
+    CASE 
+        WHEN p.profit_target > 0 
+        THEN ((p.profit_target - (a.current_balance - a.starting_balance)) / p.profit_target * 100)
+        ELSE 0 
+    END as distance_to_target_pct,
+    a.updated_at as last_updated,
+    CURRENT_TIMESTAMP as mv_refreshed_at
 FROM (
     SELECT DISTINCT ON (account_id) *
     FROM raw_accounts_data
@@ -750,6 +634,7 @@ LEFT JOIN LATERAL (
         account_id,
         SUM(total_trades) as trades_last_30d,
         SUM(net_profit) as profit_last_30d,
+        COUNT(DISTINCT date) as trading_days_last_30d,
         CASE 
             WHEN SUM(total_trades) > 0 
             THEN SUM(winning_trades)::DECIMAL / SUM(total_trades) * 100
@@ -760,142 +645,235 @@ LEFT JOIN LATERAL (
         AND date >= CURRENT_DATE - INTERVAL '30 days'
     GROUP BY account_id
 ) daily ON true
+LEFT JOIN LATERAL (
+    SELECT 
+        account_id,
+        SUM(total_trades) as trades_last_7d,
+        SUM(net_profit) as profit_last_7d,
+        CASE 
+            WHEN SUM(total_trades) > 0 
+            THEN SUM(winning_trades)::DECIMAL / SUM(total_trades) * 100
+            ELSE 0 
+        END as win_rate_last_7d
+    FROM raw_metrics_daily
+    WHERE account_id = a.account_id
+        AND date >= CURRENT_DATE - INTERVAL '7 days'
+    GROUP BY account_id
+) weekly ON true
 WITH DATA;
 
--- Create indexes on materialized view
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_account_performance_account_id ON mv_account_performance_summary(account_id);
-CREATE INDEX IF NOT EXISTS idx_mv_account_performance_status ON mv_account_performance_summary(status);
-CREATE INDEX IF NOT EXISTS idx_mv_account_performance_profit ON mv_account_performance_summary(lifetime_profit DESC);
+-- Create indexes for mv_account_performance_summary
+CREATE UNIQUE INDEX idx_mv_account_performance_account_id ON mv_account_performance_summary(account_id);
+CREATE INDEX idx_mv_account_performance_status ON mv_account_performance_summary(status) WHERE status = 'Active';
+CREATE INDEX idx_mv_account_performance_phase ON mv_account_performance_summary(phase);
+CREATE INDEX idx_mv_account_performance_profit ON mv_account_performance_summary(lifetime_profit DESC);
+CREATE INDEX idx_mv_account_performance_recent_profit ON mv_account_performance_summary(profit_last_30d DESC);
 
--- Daily trading statistics (refreshed hourly)
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_daily_trading_stats AS
+-- Daily Trading Statistics
+CREATE MATERIALIZED VIEW mv_daily_trading_stats AS
 SELECT 
     date,
     COUNT(DISTINCT account_id) as active_accounts,
+    COUNT(DISTINCT CASE WHEN net_profit > 0 THEN account_id END) as profitable_accounts,
+    COUNT(DISTINCT CASE WHEN net_profit < 0 THEN account_id END) as losing_accounts,
     SUM(total_trades) as total_trades,
+    SUM(winning_trades) as total_winning_trades,
+    SUM(losing_trades) as total_losing_trades,
     SUM(net_profit) as total_profit,
+    SUM(gross_profit) as total_gross_profit,
+    SUM(gross_loss) as total_gross_loss,
     AVG(net_profit) as avg_profit,
     STDDEV(net_profit) as profit_stddev,
     SUM(volume_traded) as total_volume,
+    SUM(lots_traded) as total_lots,
     AVG(win_rate) as avg_win_rate,
     PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY net_profit) as median_profit,
     PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY net_profit) as profit_q1,
-    PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY net_profit) as profit_q3
+    PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY net_profit) as profit_q3,
+    MAX(net_profit) as max_profit,
+    MIN(net_profit) as min_profit,
+    -- Day of week analysis
+    EXTRACT(DOW FROM date)::INTEGER as day_of_week,
+    EXTRACT(WEEK FROM date)::INTEGER as week_number,
+    EXTRACT(MONTH FROM date)::INTEGER as month,
+    EXTRACT(YEAR FROM date)::INTEGER as year,
+    CURRENT_TIMESTAMP as mv_refreshed_at
 FROM raw_metrics_daily
 WHERE date >= CURRENT_DATE - INTERVAL '365 days'
 GROUP BY date
 WITH DATA;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_daily_stats_date ON mv_daily_trading_stats(date);
+-- Create indexes on mv_daily_trading_stats
+CREATE UNIQUE INDEX idx_mv_daily_stats_date ON mv_daily_trading_stats(date);
+CREATE INDEX idx_mv_daily_stats_year_month ON mv_daily_trading_stats(year, month);
+CREATE INDEX idx_mv_daily_stats_dow ON mv_daily_trading_stats(day_of_week);
 
--- Symbol performance aggregation (refreshed daily)
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_symbol_performance AS
+-- Symbol Performance Statistics
+CREATE MATERIALIZED VIEW mv_symbol_performance AS
+WITH symbol_stats AS (
+    SELECT 
+        std_symbol,
+        COUNT(DISTINCT account_id) as traders_count,
+        COUNT(*) as total_trades,
+        SUM(profit) as total_profit,
+        AVG(profit) as avg_profit,
+        STDDEV(profit) as profit_stddev,
+        SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END) as winning_trades,
+        SUM(CASE WHEN profit < 0 THEN 1 ELSE 0 END) as losing_trades,
+        SUM(CASE WHEN profit > 0 THEN profit ELSE 0 END) as gross_profit,
+        SUM(CASE WHEN profit < 0 THEN profit ELSE 0 END) as gross_loss,
+        SUM(volume_usd) as total_volume,
+        SUM(lots) as total_lots,
+        MAX(profit) as max_profit,
+        MIN(profit) as min_profit,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY profit) as median_profit,
+        AVG(EXTRACT(EPOCH FROM (close_time - open_time))/3600) as avg_trade_duration_hours
+    FROM raw_trades_closed
+    WHERE trade_date >= CURRENT_DATE - INTERVAL '90 days'
+        AND std_symbol IS NOT NULL
+    GROUP BY std_symbol
+    HAVING COUNT(*) > 100  -- Only symbols with significant activity
+)
 SELECT 
     std_symbol,
-    COUNT(DISTINCT account_id) as traders_count,
-    COUNT(*) as total_trades,
-    SUM(profit) as total_profit,
-    AVG(profit) as avg_profit,
-    SUM(CASE WHEN profit > 0 THEN 1 ELSE 0 END)::DECIMAL / COUNT(*) * 100 as win_rate,
-    SUM(volume_usd) as total_volume,
-    STDDEV(profit) as profit_stddev,
-    MAX(profit) as max_profit,
-    MIN(profit) as min_profit
-FROM raw_trades_closed
-WHERE trade_date >= CURRENT_DATE - INTERVAL '90 days'
-    AND std_symbol IS NOT NULL
-GROUP BY std_symbol
-HAVING COUNT(*) > 100  -- Only symbols with significant activity
+    traders_count,
+    total_trades,
+    total_profit,
+    avg_profit,
+    profit_stddev,
+    winning_trades,
+    losing_trades,
+    gross_profit,
+    gross_loss,
+    CASE 
+        WHEN total_trades > 0 
+        THEN winning_trades::DECIMAL / total_trades * 100 
+        ELSE 0 
+    END as win_rate,
+    CASE 
+        WHEN gross_loss < 0 
+        THEN ABS(gross_profit / gross_loss)
+        ELSE 0 
+    END as profit_factor,
+    total_volume,
+    total_lots,
+    max_profit,
+    min_profit,
+    median_profit,
+    avg_trade_duration_hours,
+    CASE 
+        WHEN profit_stddev > 0 
+        THEN avg_profit / profit_stddev 
+        ELSE 0 
+    END as sharpe_approximation,
+    CURRENT_TIMESTAMP as mv_refreshed_at
+FROM symbol_stats
 WITH DATA;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_symbol_performance_symbol ON mv_symbol_performance(std_symbol);
-CREATE INDEX IF NOT EXISTS idx_mv_symbol_performance_profit ON mv_symbol_performance(total_profit DESC);
+-- Create indexes for mv_symbol_performance
+CREATE UNIQUE INDEX idx_mv_symbol_performance_symbol ON mv_symbol_performance(std_symbol);
+CREATE INDEX idx_mv_symbol_performance_profit ON mv_symbol_performance(total_profit DESC);
+CREATE INDEX idx_mv_symbol_performance_trades ON mv_symbol_performance(total_trades DESC);
+CREATE INDEX idx_mv_symbol_performance_win_rate ON mv_symbol_performance(win_rate DESC);
+
+-- Account Trading Patterns
+CREATE MATERIALIZED VIEW mv_account_trading_patterns AS
+WITH recent_trades AS (
+    SELECT 
+        account_id,
+        login,
+        std_symbol,
+        side,
+        EXTRACT(HOUR FROM open_time) as trade_hour,
+        EXTRACT(DOW FROM trade_date) as trade_dow,
+        profit,
+        lots,
+        volume_usd,
+        CASE WHEN stop_loss IS NOT NULL THEN 1 ELSE 0 END as has_sl,
+        CASE WHEN take_profit IS NOT NULL THEN 1 ELSE 0 END as has_tp
+    FROM raw_trades_closed
+    WHERE trade_date >= CURRENT_DATE - INTERVAL '30 days'
+)
+SELECT 
+    account_id,
+    login,
+    COUNT(*) as total_trades_30d,
+    -- Symbol concentration
+    COUNT(DISTINCT std_symbol) as unique_symbols,
+    MODE() WITHIN GROUP (ORDER BY std_symbol) as favorite_symbol,
+    MAX(symbol_trades.symbol_count)::DECIMAL / COUNT(*) * 100 as top_symbol_concentration_pct,
+    -- Time patterns
+    MODE() WITHIN GROUP (ORDER BY trade_hour) as favorite_hour,
+    MODE() WITHIN GROUP (ORDER BY trade_dow) as favorite_day_of_week,
+    -- Trading style
+    AVG(lots) as avg_lot_size,
+    STDDEV(lots) as lot_size_stddev,
+    AVG(volume_usd) as avg_trade_volume,
+    SUM(CASE WHEN side IN ('buy', 'BUY') THEN 1 ELSE 0 END)::DECIMAL / COUNT(*) * 100 as buy_ratio,
+    -- Risk management
+    AVG(has_sl) * 100 as sl_usage_rate,
+    AVG(has_tp) * 100 as tp_usage_rate,
+    -- Performance by time
+    AVG(CASE WHEN trade_hour BETWEEN 8 AND 16 THEN profit END) as avg_profit_market_hours,
+    AVG(CASE WHEN trade_hour NOT BETWEEN 8 AND 16 THEN profit END) as avg_profit_off_hours,
+    CURRENT_TIMESTAMP as mv_refreshed_at
+FROM recent_trades
+LEFT JOIN LATERAL (
+    SELECT std_symbol, COUNT(*) as symbol_count
+    FROM recent_trades rt2
+    WHERE rt2.account_id = recent_trades.account_id
+    GROUP BY std_symbol
+    ORDER BY COUNT(*) DESC
+    LIMIT 1
+) symbol_trades ON true
+GROUP BY account_id, login
+WITH DATA;
+
+-- Create indexes for mv_account_trading_patterns
+CREATE UNIQUE INDEX idx_mv_trading_patterns_account_id ON mv_account_trading_patterns(account_id);
+CREATE INDEX idx_mv_trading_patterns_login ON mv_account_trading_patterns(login);
+
+-- Market Regime Performance
+CREATE MATERIALIZED VIEW mv_market_regime_performance AS
+SELECT 
+    r.date,
+    r.summary->>'market_sentiment' as market_sentiment,
+    r.summary->>'volatility_regime' as volatility_regime,
+    r.summary->>'liquidity_state' as liquidity_state,
+    COUNT(DISTINCT m.account_id) as active_accounts,
+    SUM(m.total_trades) as total_trades,
+    SUM(m.net_profit) as total_profit,
+    AVG(m.net_profit) as avg_profit,
+    STDDEV(m.net_profit) as profit_stddev,
+    AVG(m.win_rate) as avg_win_rate,
+    SUM(m.volume_traded) as total_volume,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY m.net_profit) as median_profit,
+    COUNT(DISTINCT CASE WHEN m.net_profit > 0 THEN m.account_id END) as profitable_accounts,
+    CURRENT_TIMESTAMP as mv_refreshed_at
+FROM raw_regimes_daily r
+INNER JOIN raw_metrics_daily m ON r.date = m.date
+WHERE r.date >= CURRENT_DATE - INTERVAL '180 days'
+    AND r.summary IS NOT NULL
+GROUP BY r.date, r.summary
+WITH DATA;
+
+-- Create indexes for mv_market_regime_performance
+CREATE INDEX idx_mv_regime_performance_date ON mv_market_regime_performance(date DESC);
+CREATE INDEX idx_mv_regime_performance_sentiment ON mv_market_regime_performance(market_sentiment);
 
 -- ========================================
--- Foreign Key Constraints with Cascading
+-- Functions and Procedures
 -- ========================================
 
--- Add foreign keys with appropriate cascading rules
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.table_constraints 
-        WHERE constraint_name = 'fk_accounts_plan_id' 
-        AND table_schema = 'prop_trading_model'
-        AND table_name = 'raw_accounts_data'
-    ) THEN
-        ALTER TABLE raw_accounts_data 
-            ADD CONSTRAINT fk_accounts_plan_id 
-            FOREIGN KEY (plan_id) 
-            REFERENCES raw_plans_data(plan_id) 
-            ON DELETE SET NULL 
-            ON UPDATE CASCADE;
-    END IF;
-    
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.table_constraints 
-        WHERE constraint_name = 'fk_stg_accounts_plan_id' 
-        AND table_schema = 'prop_trading_model'
-        AND table_name = 'stg_accounts_daily_snapshots'
-    ) THEN
-        ALTER TABLE stg_accounts_daily_snapshots 
-            ADD CONSTRAINT fk_stg_accounts_plan_id 
-            FOREIGN KEY (plan_id) 
-            REFERENCES raw_plans_data(plan_id) 
-            ON DELETE SET NULL 
-            ON UPDATE CASCADE;
-    END IF;
-END $$;
-
--- ========================================
--- Automated Maintenance Functions
--- ========================================
-
--- Function to automatically create new partitions
-CREATE OR REPLACE FUNCTION create_monthly_partitions() RETURNS void AS $$
-DECLARE
-    next_month DATE;
-    partition_name TEXT;
-BEGIN
-    -- Create partition for next month if it doesn't exist
-    next_month := DATE_TRUNC('month', CURRENT_DATE + INTERVAL '1 month');
-    partition_name := 'raw_trades_closed_' || to_char(next_month, 'YYYY_MM');
-    
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_class 
-        WHERE relname = partition_name 
-        AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'prop_trading_model')
-    ) THEN
-        EXECUTE format('
-            CREATE TABLE %I PARTITION OF raw_trades_closed
-            FOR VALUES FROM (%L) TO (%L)',
-            partition_name,
-            next_month,
-            next_month + INTERVAL '1 month'
-        );
-        
-        -- Create indexes on new partition
-        EXECUTE format('
-            CREATE INDEX %I ON %I (account_id);
-            CREATE INDEX %I ON %I (trade_date);
-            CREATE INDEX %I ON %I (account_id, trade_date);',
-            'idx_' || partition_name || '_account_id', partition_name,
-            'idx_' || partition_name || '_trade_date', partition_name,
-            'idx_' || partition_name || '_account_date', partition_name
-        );
-        
-        RAISE NOTICE 'Created partition: %', partition_name;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
--- Function to refresh materialized views
+-- Function to refresh all materialized views
 CREATE OR REPLACE FUNCTION refresh_materialized_views() RETURNS void AS $$
 BEGIN
     -- Refresh views in dependency order
     REFRESH MATERIALIZED VIEW CONCURRENTLY mv_daily_trading_stats;
     REFRESH MATERIALIZED VIEW CONCURRENTLY mv_symbol_performance;
     REFRESH MATERIALIZED VIEW CONCURRENTLY mv_account_performance_summary;
+    REFRESH MATERIALIZED VIEW CONCURRENTLY mv_account_trading_patterns;
+    REFRESH MATERIALIZED VIEW CONCURRENTLY mv_market_regime_performance;
     
     -- Log refresh
     INSERT INTO pipeline_execution_log (
@@ -912,202 +890,127 @@ BEGIN
         CURRENT_TIMESTAMP,
         'success',
         jsonb_build_object(
-            'views_refreshed', ARRAY['mv_daily_trading_stats', 'mv_symbol_performance', 'mv_account_performance_summary']
+            'views_refreshed', ARRAY[
+                'mv_daily_trading_stats', 
+                'mv_symbol_performance', 
+                'mv_account_performance_summary',
+                'mv_account_trading_patterns',
+                'mv_market_regime_performance'
+            ]
         )
     );
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to analyze partition statistics
-CREATE OR REPLACE FUNCTION analyze_partitions() RETURNS TABLE(
-    table_name TEXT,
-    partition_name TEXT,
-    size_pretty TEXT,
-    row_count BIGINT
-) AS $$
+-- Function to create monthly partitions for partitioned tables
+CREATE OR REPLACE FUNCTION create_monthly_partitions(
+    table_name text,
+    start_date date,
+    end_date date
+) RETURNS void AS $$
+DECLARE
+    partition_date date;
+    partition_name text;
+    date_column text;
 BEGIN
-    RETURN QUERY
-    SELECT 
-        parent.relname::TEXT as table_name,
-        child.relname::TEXT as partition_name,
-        pg_size_pretty(pg_relation_size(child.oid)) as size_pretty,
-        child.reltuples::BIGINT as row_count
-    FROM pg_inherits
-    JOIN pg_class parent ON pg_inherits.inhparent = parent.oid
-    JOIN pg_class child ON pg_inherits.inhrelid = child.oid
-    WHERE parent.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'prop_trading_model')
-    ORDER BY parent.relname, child.relname;
+    -- Determine date column based on table
+    IF table_name = 'raw_metrics_daily' THEN
+        date_column := 'date';
+    ELSIF table_name = 'raw_trades_closed' THEN
+        date_column := 'trade_date';
+    ELSE
+        RAISE EXCEPTION 'Unknown table for partitioning: %', table_name;
+    END IF;
+    
+    -- Create partitions for each month
+    FOR partition_date IN 
+        SELECT generate_series(
+            start_date,
+            end_date,
+            interval '1 month'
+        )::date
+    LOOP
+        partition_name := table_name || '_' || to_char(partition_date, 'YYYY_MM');
+        
+        -- Check if partition exists
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_tables 
+            WHERE schemaname = 'prop_trading_model' 
+            AND tablename = partition_name
+        ) THEN
+            EXECUTE format('
+                CREATE TABLE %I PARTITION OF %I
+                FOR VALUES FROM (%L) TO (%L)',
+                partition_name,
+                table_name,
+                partition_date,
+                partition_date + interval '1 month'
+            );
+            
+            RAISE NOTICE 'Created partition: %', partition_name;
+        END IF;
+    END LOOP;
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to update table statistics for all tables in the schema
-CREATE OR REPLACE FUNCTION update_table_statistics() RETURNS void AS $$
+-- Function to clean old partitions
+CREATE OR REPLACE FUNCTION drop_old_partitions(
+    table_name text,
+    retention_months integer DEFAULT 36
+) RETURNS void AS $$
 DECLARE
-    table_rec RECORD;
-    start_time TIMESTAMP;
-    total_tables INTEGER := 0;
-    successful_tables INTEGER := 0;
+    partition_record record;
+    cutoff_date date;
 BEGIN
-    start_time := CURRENT_TIMESTAMP;
+    cutoff_date := CURRENT_DATE - (retention_months || ' months')::interval;
     
-    -- Analyze all tables in the prop_trading_model schema
-    FOR table_rec IN 
+    FOR partition_record IN 
         SELECT tablename 
         FROM pg_tables 
-        WHERE schemaname = 'prop_trading_model'
-        ORDER BY tablename
+        WHERE schemaname = 'prop_trading_model' 
+        AND tablename LIKE table_name || '_%'
+        AND tablename ~ '\d{4}_\d{2}$'
     LOOP
-        total_tables := total_tables + 1;
-        
-        BEGIN
-            EXECUTE format('ANALYZE prop_trading_model.%I;', table_rec.tablename);
-            successful_tables := successful_tables + 1;
-            RAISE NOTICE 'Analyzed table: %', table_rec.tablename;
-        EXCEPTION
-            WHEN OTHERS THEN
-                RAISE WARNING 'Failed to analyze table %: %', table_rec.tablename, SQLERRM;
-        END;
+        -- Extract date from partition name
+        IF to_date(right(partition_record.tablename, 7), 'YYYY_MM') < cutoff_date THEN
+            EXECUTE format('DROP TABLE IF EXISTS %I.%I', 'prop_trading_model', partition_record.tablename);
+            RAISE NOTICE 'Dropped old partition: %', partition_record.tablename;
+        END IF;
     END LOOP;
-    
-    -- Log the operation
-    INSERT INTO pipeline_execution_log (
-        pipeline_stage, 
-        execution_date, 
-        start_time, 
-        end_time, 
-        status, 
-        records_processed,
-        execution_details
-    ) VALUES (
-        'update_table_statistics',
-        CURRENT_DATE,
-        start_time,
-        CURRENT_TIMESTAMP,
-        CASE WHEN successful_tables = total_tables THEN 'success' ELSE 'partial_success' END,
-        successful_tables,
-        jsonb_build_object(
-            'total_tables', total_tables,
-            'successful_tables', successful_tables,
-            'duration_seconds', EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - start_time))
-        )
-    );
-    
-    RAISE NOTICE 'Statistics update complete: %/% tables analyzed', successful_tables, total_tables;
-END;
-$$ LANGUAGE plpgsql;
-
--- Function to vacuum all tables in the schema with intelligent scheduling
-CREATE OR REPLACE FUNCTION vacuum_tables() RETURNS void AS $$
-DECLARE
-    table_rec RECORD;
-    partition_rec RECORD;
-    start_time TIMESTAMP;
-    total_operations INTEGER := 0;
-    successful_operations INTEGER := 0;
-    operation_type TEXT;
-BEGIN
-    start_time := CURRENT_TIMESTAMP;
-    
-    -- Vacuum all regular tables in the prop_trading_model schema
-    FOR table_rec IN 
-        SELECT 
-            tablename,
-            CASE 
-                WHEN tablename LIKE 'raw_%' THEN 'VACUUM ANALYZE'
-                WHEN tablename LIKE 'mv_%' THEN 'VACUUM'  -- Materialized views
-                ELSE 'VACUUM ANALYZE'
-            END as vacuum_command
-        FROM pg_tables 
-        WHERE schemaname = 'prop_trading_model'
-        ORDER BY 
-            CASE 
-                WHEN tablename IN ('raw_trades_closed', 'raw_metrics_daily') THEN 1  -- Partitioned tables first
-                WHEN tablename LIKE 'raw_%' THEN 2  -- Raw tables
-                WHEN tablename LIKE 'stg_%' THEN 3  -- Staging tables
-                WHEN tablename LIKE 'feature_%' THEN 4  -- Feature tables
-                WHEN tablename LIKE 'model_%' THEN 5  -- Model tables
-                ELSE 6  -- Everything else
-            END,
-            tablename
-    LOOP
-        total_operations := total_operations + 1;
-        
-        BEGIN
-            -- Skip partitioned parent tables (they don't store data directly)
-            IF table_rec.tablename IN ('raw_trades_closed', 'raw_metrics_daily') THEN
-                RAISE NOTICE 'Skipping partitioned parent table: %', table_rec.tablename;
-                successful_operations := successful_operations + 1;
-                CONTINUE;
-            END IF;
-            
-            EXECUTE format('%s prop_trading_model.%I;', table_rec.vacuum_command, table_rec.tablename);
-            successful_operations := successful_operations + 1;
-            RAISE NOTICE 'Vacuumed table: % (% command)', table_rec.tablename, table_rec.vacuum_command;
-            
-        EXCEPTION
-            WHEN OTHERS THEN
-                RAISE WARNING 'Failed to vacuum table %: %', table_rec.tablename, SQLERRM;
-        END;
-    END LOOP;
-    
-    -- Vacuum partitions of partitioned tables
-    FOR partition_rec IN 
-        SELECT 
-            child.relname as partition_name,
-            parent.relname as parent_table
-        FROM pg_inherits
-        JOIN pg_class parent ON pg_inherits.inhparent = parent.oid
-        JOIN pg_class child ON pg_inherits.inhrelid = child.oid
-        JOIN pg_namespace n ON parent.relnamespace = n.oid
-        WHERE n.nspname = 'prop_trading_model'
-        ORDER BY parent.relname, child.relname
-    LOOP
-        total_operations := total_operations + 1;
-        
-        BEGIN
-            EXECUTE format('VACUUM ANALYZE prop_trading_model.%I;', partition_rec.partition_name);
-            successful_operations := successful_operations + 1;
-            RAISE NOTICE 'Vacuumed partition: % (parent: %)', partition_rec.partition_name, partition_rec.parent_table;
-            
-        EXCEPTION
-            WHEN OTHERS THEN
-                RAISE WARNING 'Failed to vacuum partition %: %', partition_rec.partition_name, SQLERRM;
-        END;
-    END LOOP;
-    
-    -- Log the operation
-    INSERT INTO pipeline_execution_log (
-        pipeline_stage, 
-        execution_date, 
-        start_time, 
-        end_time, 
-        status, 
-        records_processed,
-        execution_details
-    ) VALUES (
-        'vacuum_tables',
-        CURRENT_DATE,
-        start_time,
-        CURRENT_TIMESTAMP,
-        CASE WHEN successful_operations = total_operations THEN 'success' ELSE 'partial_success' END,
-        successful_operations,
-        jsonb_build_object(
-            'total_operations', total_operations,
-            'successful_operations', successful_operations,
-            'duration_seconds', EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - start_time))
-        )
-    );
-    
-    RAISE NOTICE 'Vacuum complete: %/% operations successful', successful_operations, total_operations;
 END;
 $$ LANGUAGE plpgsql;
 
 -- ========================================
--- Grant permissions (adjust as needed)
+-- Permissions (adjust based on your users)
 -- ========================================
 
--- Example: Grant usage on schema to application user
--- GRANT USAGE ON SCHEMA prop_trading_model TO your_app_user;
--- GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA prop_trading_model TO your_app_user;
--- GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA prop_trading_model TO your_app_user;
--- GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA prop_trading_model TO your_app_user;
+-- Grant usage on schema
+GRANT USAGE ON SCHEMA prop_trading_model TO PUBLIC;
+
+-- Grant appropriate permissions on tables
+GRANT SELECT ON ALL TABLES IN SCHEMA prop_trading_model TO PUBLIC;
+GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA prop_trading_model TO PUBLIC;
+
+-- Grant permissions on sequences
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA prop_trading_model TO PUBLIC;
+
+-- ========================================
+-- Initial Data Load
+-- ========================================
+
+-- Add any initial data or configurations here
+
+-- ========================================
+-- Schedule Maintenance Jobs (optional)
+-- ========================================
+
+-- Schedule materialized view refresh (requires pg_cron extension)
+-- SELECT cron.schedule('refresh-materialized-views', '0 */2 * * *', 'SELECT prop_trading_model.refresh_materialized_views();');
+
+-- Schedule partition maintenance
+-- SELECT cron.schedule('create-new-partitions', '0 0 1 * *', 'SELECT prop_trading_model.create_monthly_partitions(''raw_metrics_daily'', CURRENT_DATE, CURRENT_DATE + interval ''3 months'');');
+-- SELECT cron.schedule('create-new-partitions-trades', '0 0 1 * *', 'SELECT prop_trading_model.create_monthly_partitions(''raw_trades_closed'', CURRENT_DATE, CURRENT_DATE + interval ''3 months'');');
+
+-- Note: Final schema ready for use!
+-- This consolidated schema includes all tables, indexes, functions, and views
+-- No separate migrations needed during early development

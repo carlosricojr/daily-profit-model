@@ -17,6 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.database import get_db_manager, close_db_connections
 from utils.logging_config import setup_logging
+from utils.schema_manager import SchemaManager
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +33,8 @@ class PipelineOrchestrator:
         # Pipeline stages configuration
         self.stages = {
             "schema": {
-                "name": "Database Schema Creation",
-                "script": None,  # Special handling
+                "name": "Database Schema Management",
+                "script": None,  # Special handling - intelligent schema migration
                 "module": None,
             },
             "ingestion": {
@@ -81,6 +82,8 @@ class PipelineOrchestrator:
         end_date: Optional[date] = None,
         skip_completed: bool = True,
         dry_run: bool = False,
+        force_recreate_schema: bool = False,
+        preserve_data: bool = True,
     ) -> Dict[str, Any]:
         """
         Run the pipeline stages.
@@ -91,6 +94,8 @@ class PipelineOrchestrator:
             end_date: End date for data processing
             skip_completed: Skip stages that have already completed successfully today
             dry_run: If True, only show what would be executed
+            force_recreate_schema: If True, drop and recreate schema (loses all data!)
+            preserve_data: If True, preserve existing data during schema migrations
 
         Returns:
             Dictionary containing execution results
@@ -123,9 +128,12 @@ class PipelineOrchestrator:
 
             try:
                 if stage_name == "schema":
-                    # Special handling for schema creation
-                    if not dry_run:
-                        self._create_schema()
+                    # Special handling for schema management
+                    self._create_schema(
+                        force_recreate=force_recreate_schema,
+                        preserve_data=preserve_data,
+                        dry_run=dry_run
+                    )
                     results[stage_name] = {"status": "success", "duration": 0}
 
                 elif stage_name == "ingestion":
@@ -178,25 +186,63 @@ class PipelineOrchestrator:
 
         return results
 
-    def _create_schema(self):
-        """Create the database schema."""
+    def _create_schema(self, force_recreate=False, preserve_data=True, dry_run=False):
+        """
+        Ensure database schema compliance with desired state.
+        
+        Args:
+            force_recreate: If True, drop and recreate schema (old behavior)
+            preserve_data: If True, preserve existing data during migrations
+            dry_run: If True, only show what would be done
+        """
         schema_file = self.src_dir / "db_schema" / "schema.sql"
 
         if not schema_file.exists():
             raise FileNotFoundError(f"Schema file not found: {schema_file}")
 
-        logger.info(f"Creating database schema from {schema_file}")
-
-        # Read schema file
-        with open(schema_file, "r") as f:
-            schema_sql = f.read()
-
-        # Execute schema creation
-        with self.db_manager.model_db.get_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(schema_sql)
-
-        logger.info("Database schema created successfully")
+        logger.info(f"Checking database schema compliance with {schema_file}")
+        
+        if force_recreate:
+            logger.warning("FORCE RECREATE: This will DROP and recreate the entire prop_trading_model schema!")
+            if not dry_run:
+                # Read schema file
+                with open(schema_file, "r") as f:
+                    schema_sql = f.read()
+                
+                # Execute schema creation (old behavior)
+                with self.db_manager.model_db.get_connection() as conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute(schema_sql)
+                        conn.commit()
+                
+                logger.info("Database schema recreated successfully")
+            else:
+                logger.info("DRY RUN: Would drop and recreate entire schema")
+        else:
+            # Use intelligent schema management
+            schema_manager = SchemaManager(self.db_manager)
+            
+            logger.info("Analyzing current database state and comparing with desired schema...")
+            result = schema_manager.ensure_schema_compliance(
+                schema_path=schema_file,
+                preserve_data=preserve_data,
+                dry_run=dry_run
+            )
+            
+            if result['migration_needed']:
+                if result['success']:
+                    logger.info("Schema migration completed successfully")
+                    logger.info(f"  - Objects created: {len(result['comparison']['to_create'])}")
+                    logger.info(f"  - Objects modified: {len(result['comparison']['to_modify'])}")
+                    logger.info(f"  - Objects dropped: {len(result['comparison']['to_drop'])}")
+                    if dry_run:
+                        logger.info("DRY RUN MODE - Review migration script:")
+                        logger.info(f"  Migration file: {result['migration_file']}")
+                        logger.info(f"  Rollback file: {result['rollback_file']}")
+                else:
+                    raise RuntimeError(f"Schema migration failed: {result.get('error', 'Unknown error')}")
+            else:
+                logger.info("Database schema is already compliant. No changes needed.")
 
     def _run_ingestion(
         self,
@@ -543,7 +589,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Available stages:
-  schema              - Create database schema
+  schema              - Ensure database schema compliance (intelligently migrates without data loss)
   ingestion          - Ingest data from APIs and CSV files
   preprocessing      - Create staging snapshots and clean data
   feature_engineering - Engineer features and build training data
@@ -551,8 +597,14 @@ Available stages:
   prediction         - Generate daily predictions
 
 Examples:
-  # Run the entire pipeline
+  # Run the entire pipeline (with intelligent schema updates)
   python run_pipeline.py
+  
+  # Check what schema changes would be made without applying them
+  python run_pipeline.py --stages schema --dry-run
+  
+  # Force recreate schema from scratch (DESTROYS ALL DATA!)
+  python run_pipeline.py --stages schema --force-recreate-schema
   
   # Run only ingestion and preprocessing
   python run_pipeline.py --stages ingestion preprocessing
@@ -597,6 +649,16 @@ Examples:
         help="Show what would be executed without running",
     )
     parser.add_argument(
+        "--force-recreate-schema",
+        action="store_true",
+        help="Force drop and recreate schema (DESTROYS ALL DATA!)",
+    )
+    parser.add_argument(
+        "--no-preserve-data",
+        action="store_true",
+        help="Don't preserve data during schema migrations (faster but destructive)",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
@@ -617,6 +679,8 @@ Examples:
             end_date=args.end_date,
             skip_completed=not args.force,
             dry_run=args.dry_run,
+            force_recreate_schema=args.force_recreate_schema,
+            preserve_data=not args.no_preserve_data,
         )
 
         # Exit with appropriate code

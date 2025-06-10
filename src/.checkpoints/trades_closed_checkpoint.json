@@ -1,0 +1,17 @@
+{
+  "last_processed_date": "2025-03-18",
+  "total_records": 0,
+  "new_records": 0,
+  "metrics": {
+    "total_records": 0,
+    "new_records": 0,
+    "duplicate_records": 0,
+    "invalid_records": 0,
+    "api_calls": 0,
+    "api_errors": 0,
+    "db_errors": 0,
+    "validation_errors": {},
+    "processing_time": 0.0,
+    "records_per_second": 0.0
+  }
+}
