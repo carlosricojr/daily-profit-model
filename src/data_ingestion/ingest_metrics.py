@@ -386,7 +386,8 @@ class MetricsIngester(BaseIngester):
                     # Restore metrics from checkpoint
                     if "metrics" in checkpoint:
                         for key, value in checkpoint["metrics"].items():
-                            if hasattr(self.metrics, key):
+                            # Skip read-only properties like processing_time and records_per_second
+                            if hasattr(self.metrics, key) and not isinstance(getattr(type(self.metrics), key, None), property):
                                 setattr(self.metrics, key, value)
 
             # Handle full refresh
