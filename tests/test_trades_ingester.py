@@ -83,16 +83,37 @@ class TestTradesIngester:
 
         # Valid closed trade (using actual API field names)
         valid_closed = {
-            "position": "W89948879651022156",  # This is the unique ID
-            "login": "80039260",
-            "stdSymbol": "EURUSD",  # This is what we use for symbol
-            "side": "Buy",
-            "openTime": "2024-01-15T10:00:00Z",
-            "closeTime": "2024-01-15T11:00:00Z",
-            "profit": 100.0,
-            "lots": 0.1,
+            "tradeDate": "2025-06-01T00:00:00.000Z",
+            "broker": 4,
+            "mngr": 201,
+            "platform": 8,
+            "ticket": "W8994887965912253",
+            "position": "W8994887965912253",
+            "login": "25011525",
+            "trdSymbol": "BTCUSD",
+            "stdSymbol": "BTCUSD",
+            "side": "Sell",
+            "lots": 0.9,
+            "contractSize": 1,
+            "qtyInBaseCrncy": 0.9,
+            "volumeUSD": 94496.1,
+            "stopLoss": None,
+            "takeProfit": None,
+            "openTime": "2025-05-31T04:55:46.978Z",
+            "openPrice": 103387.2,
+            "closeTime": "2025-06-01T00:06:00.721Z",
+            "closePrice": 104995.67,
+            "duration": 19.170484166666668,
+            "profit": -1447.62,
+            "commission": 0,
+            "fee": 0,
+            "swap": 0,
+            "comment": None,
+            "client_margin": 4724.805,
+            "firm_margin": 188.99220000000003
         }
         is_valid, errors = ingester._validate_trade_record(valid_closed, "closed")
+        print(f"Valid closed trade validation: {is_valid}, errors: {errors}")
         assert is_valid is True
         assert len(errors) == 0
 
@@ -100,6 +121,7 @@ class TestTradesIngester:
         invalid = valid_closed.copy()
         del invalid["position"]
         is_valid, errors = ingester._validate_trade_record(invalid, "closed")
+        print(f"Invalid closed trade validation: {is_valid}, errors: {errors}")
         assert is_valid is False
         assert any("Missing required field: position" in error for error in errors)
 
@@ -107,6 +129,7 @@ class TestTradesIngester:
         invalid = valid_closed.copy()
         invalid["lots"] = -0.1
         is_valid, errors = ingester._validate_trade_record(invalid, "closed")
+        print(f"Invalid closed trade validation: {is_valid}, errors: {errors}")
         assert is_valid is False
         assert any("Lots must be positive" in error for error in errors)
 
@@ -159,6 +182,19 @@ class TestTradesIngester:
             mock_db_instance.log_pipeline_execution = Mock()
             mock_db_instance.model_db = Mock()
             mock_db_instance.model_db.execute_command = Mock(return_value=0)
+            
+            # Setup context manager for database connection
+            mock_conn = Mock()
+            mock_cursor = Mock()
+            mock_cursor.fetchone.return_value = (0,)  # No trades need resolution
+            mock_cursor.fetchall.return_value = []  # No missing mappings
+            mock_cursor.__enter__ = Mock(return_value=mock_cursor)
+            mock_cursor.__exit__ = Mock(return_value=None)
+            mock_conn.cursor.return_value = mock_cursor
+            mock_conn.__enter__ = Mock(return_value=mock_conn)
+            mock_conn.__exit__ = Mock(return_value=None)
+            mock_db_instance.model_db.get_connection.return_value = mock_conn
+            
             mock_db_manager.return_value = mock_db_instance
 
             # Create ingester with custom checkpoint manager
@@ -190,22 +226,64 @@ class TestTradesIngester:
             [
                 [
                     {
-                        "tradeId": "1",
-                        "accountId": "A1",
+                        "tradeDate": "2024-01-15T00:00:00.000Z",
+                        "broker": 5,
+                        "mngr": 1,
+                        "platform": 5,
+                        "ticket": "T1",
+                        "position": "P1",
                         "login": "U1",
-                        "symbol": "EURUSD",
-                        "side": "buy",
+                        "trdSymbol": "EURUSD",
+                        "stdSymbol": "EURUSD",
+                        "side": "Buy",
+                        "lots": 1.0,
+                        "contractSize": 100000,
+                        "qtyInBaseCrncy": 100000,
+                        "volumeUSD": 100000,
+                        "stopLoss": 1.0900,
+                        "takeProfit": 1.1100,
                         "openTime": "2024-01-15T10:00:00Z",
+                        "openPrice": 1.1000,
+                        "closeTime": "2024-01-15T11:00:00Z",
+                        "closePrice": 1.1010,
+                        "duration": 1.0,
                         "profit": 100,
+                        "commission": 0,
+                        "fee": 0,
+                        "swap": 0,
+                        "comment": "",
+                        "client_margin": 500,
+                        "firm_margin": 20,
                     },
                     {
-                        "tradeId": "2",
-                        "accountId": "A2",
+                        "tradeDate": "2024-01-15T00:00:00.000Z",
+                        "broker": 5,
+                        "mngr": 1,
+                        "platform": 5,
+                        "ticket": "T2",
+                        "position": "P2",
                         "login": "U2",
-                        "symbol": "GBPUSD",
-                        "side": "sell",
+                        "trdSymbol": "GBPUSD",
+                        "stdSymbol": "GBPUSD",
+                        "side": "Sell",
+                        "lots": 0.5,
+                        "contractSize": 100000,
+                        "qtyInBaseCrncy": 50000,
+                        "volumeUSD": 62500,
+                        "stopLoss": 1.2700,
+                        "takeProfit": 1.2500,
                         "openTime": "2024-01-15T11:00:00Z",
+                        "openPrice": 1.2600,
+                        "closeTime": "2024-01-15T12:00:00Z",
+                        "closePrice": 1.2650,
+                        "duration": 1.0,
                         "profit": -50,
+                        "commission": 0,
+                        "fee": 0,
+                        "swap": 0,
+                        "comment": "",
+                        "client_margin": 315,
+                        "firm_margin": 12.6,
                     },
                 ]
             ]
@@ -217,10 +295,19 @@ class TestTradesIngester:
         mock_db_instance = Mock()
         mock_db_instance.log_pipeline_execution = Mock()
         mock_db_instance.model_db = Mock()
+        
+        # Setup context manager for database connection
         mock_conn = Mock()
+        mock_cursor = Mock()
+        mock_cursor.fetchone.return_value = (0,)  # No trades need resolution
+        mock_cursor.fetchall.return_value = []  # No missing mappings
+        mock_cursor.__enter__ = Mock(return_value=mock_cursor)
+        mock_cursor.__exit__ = Mock(return_value=None)
+        mock_conn.cursor.return_value = mock_cursor
         mock_conn.__enter__ = Mock(return_value=mock_conn)
         mock_conn.__exit__ = Mock(return_value=None)
         mock_db_instance.model_db.get_connection.return_value = mock_conn
+        
         mock_db_manager.return_value = mock_db_instance
 
         ingester = TradesIngester()
@@ -288,13 +375,101 @@ class TestTradesIngester:
 
         ingester = TradesIngester()
 
-        # Insert batch with 5 records but only 1 new
-        batch_data = [{"trade_id": f"T{i}", "other": "data"} for i in range(5)]
+        # Insert batch with 5 records but only 1 new - using real trade record fields
+        # Primary key is (platform, position, trade_date) for trades tables
+        from datetime import date
+        batch_data = [
+            {
+                "platform": "5",
+                "position": f"P{i}",
+                "trade_date": date(2024, 1, 15),
+                "broker": "5",
+                "login": "12345",
+                "profit": 100.0,
+                "lots": 1.0,
+                "ingestion_timestamp": "2024-01-15 10:00:00",
+                "source_api_endpoint": "/v2/trades/closed"
+            } for i in range(5)
+        ]
 
         success = ingester._insert_trades_batch(batch_data, "test_table")
 
         assert success
         assert ingester.metrics.duplicate_records == 4  # 5 total - 1 new
+
+    @patch("data_ingestion.ingest_trades.get_db_manager")
+    def test_batch_account_resolution(self, mock_db_manager):
+        """Test batch account ID resolution functionality."""
+        # Mock DB with proper context managers
+        mock_db_instance = Mock()
+        mock_conn = Mock()
+        mock_cursor = Mock()
+        
+        # Setup mock responses for the optimized query flow
+        mock_cursor.fetchone.return_value = (1,)  # Has trades needing resolution
+        mock_cursor.rowcount = 1000  # 1000 trades updated
+        mock_cursor.fetchall.side_effect = [
+            # First call: check for missing mappings after update
+            [("login1", 5, 4), ("login2", 5, 4)],
+            # Second call: check for duplicate account_ids
+            []  # No duplicates
+        ]
+        
+        mock_cursor.__enter__ = Mock(return_value=mock_cursor)
+        mock_cursor.__exit__ = Mock(return_value=None)
+        mock_conn.cursor.return_value = mock_cursor
+        mock_conn.commit = Mock()
+        mock_conn.__enter__ = Mock(return_value=mock_conn)
+        mock_conn.__exit__ = Mock(return_value=None)
+        mock_db_instance.model_db.get_connection.return_value = mock_conn
+        mock_db_manager.return_value = mock_db_instance
+        
+        ingester = TradesIngester()
+        
+        # Test account resolution
+        updated_count = ingester._batch_resolve_account_ids("raw_trades_closed")
+        
+        # Verify results
+        assert updated_count == 1000  # Trades were updated
+        assert mock_cursor.execute.call_count >= 4  # COUNT, UPDATE, SELECT missing, SELECT duplicates
+        assert mock_conn.commit.called  # Changes were committed
+        
+    @patch("data_ingestion.ingest_trades.get_db_manager")
+    def test_batch_account_resolution_duplicate_error(self, mock_db_manager):
+        """Test that duplicate account_ids for same (login, platform, broker) raise an error."""
+        # Mock DB with proper context managers
+        mock_db_instance = Mock()
+        mock_conn = Mock()
+        mock_cursor = Mock()
+        
+        # Setup mock returns
+        mock_cursor.fetchone.return_value = (1,)  # Has trades needing resolution
+        mock_cursor.rowcount = 0  # No rows updated by UPDATE JOIN
+        
+        # First fetchall returns missing mappings, second returns duplicate account_ids
+        mock_cursor.fetchall.side_effect = [
+            [("login1", 5, 4)],  # Missing mapping
+            [("login1", 5, 4, 2)]  # Duplicate account_ids (count > 1)
+        ]
+        
+        mock_cursor.__enter__ = Mock(return_value=mock_cursor)
+        mock_cursor.__exit__ = Mock(return_value=None)
+        mock_conn.cursor.return_value = mock_cursor
+        mock_conn.__enter__ = Mock(return_value=mock_conn)
+        mock_conn.__exit__ = Mock(return_value=None)
+        mock_db_instance.model_db.get_connection.return_value = mock_conn
+        mock_db_manager.return_value = mock_db_instance
+        
+        ingester = TradesIngester()
+        
+        # Should raise AssertionError due to duplicate account_ids
+        with pytest.raises(AssertionError) as exc_info:
+            ingester._batch_resolve_account_ids("raw_trades_closed")
+        
+        assert "Multiple account_ids found" in str(exc_info.value)
+        assert "login=login1" in str(exc_info.value)
+        assert "platform=5" in str(exc_info.value)
+        assert "broker=4" in str(exc_info.value)
 
 
 if __name__ == "__main__":

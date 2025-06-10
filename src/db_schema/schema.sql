@@ -35,11 +35,11 @@ CREATE TABLE raw_metrics_alltime (
     -- Account metadata
     plan_id VARCHAR(255),
     trader_id VARCHAR(255),
-    status INTEGER,
+    status INTEGER CHECK (status IN (0, 1, 2, 3)),
     type INTEGER,
-    phase INTEGER,
+    phase INTEGER CHECK (phase IN (1, 2, 3, 4)),
     broker INTEGER,
-    mt_version INTEGER,
+    platform INTEGER,
     price_stream INTEGER,
     country VARCHAR(2),
     
@@ -252,9 +252,7 @@ CREATE INDEX idx_raw_metrics_alltime_account_id ON raw_metrics_alltime(account_i
 CREATE INDEX idx_raw_metrics_alltime_login ON raw_metrics_alltime(login);
 CREATE INDEX idx_raw_metrics_alltime_plan_id ON raw_metrics_alltime(plan_id);
 CREATE INDEX idx_raw_metrics_alltime_trader_id ON raw_metrics_alltime(trader_id);
-CREATE INDEX idx_raw_metrics_alltime_ingestion ON raw_metrics_alltime(ingestion_timestamp DESC);
-CREATE INDEX idx_raw_metrics_alltime_profit ON raw_metrics_alltime(net_profit DESC) WHERE net_profit IS NOT NULL;
-CREATE INDEX idx_raw_metrics_alltime_sharpe ON raw_metrics_alltime(daily_sharpe DESC) WHERE daily_sharpe IS NOT NULL;
+CREATE INDEX idx_raw_metrics_alltime_login_platform_broker ON raw_metrics_alltime(login, platform, broker);
 
 -- Raw metrics daily - PARTITIONED BY RANGE (date) for performance
 CREATE TABLE raw_metrics_daily (
@@ -269,7 +267,7 @@ CREATE TABLE raw_metrics_daily (
     type INTEGER,
     phase INTEGER,
     broker INTEGER,
-    mt_version INTEGER,
+    platform INTEGER,
     price_stream INTEGER,
     country VARCHAR(2),
     
@@ -510,7 +508,7 @@ CREATE TABLE raw_metrics_hourly (
     type INTEGER,
     phase INTEGER,
     broker INTEGER,
-    mt_version INTEGER,
+    platform INTEGER,
     price_stream INTEGER,
     country VARCHAR(2),
     
@@ -708,10 +706,10 @@ CREATE INDEX idx_raw_metrics_hourly_profit ON raw_metrics_hourly(date DESC, hour
 -- Raw trades closed - PARTITIONED BY RANGE (trade_date)
 CREATE TABLE raw_trades_closed (
     trade_date DATE NOT NULL,
-    broker VARCHAR(255),
-    manager VARCHAR(255),
-    platform VARCHAR(255),
-    ticket VARCHAR(255),
+    broker INTEGER,
+    manager INTEGER,
+    platform INTEGER,
+    ticket INTEGER,
     position VARCHAR(255),
     login VARCHAR(255) NOT NULL,
     account_id VARCHAR(255), -- Nullable to handle cases where we only have login initially
@@ -735,7 +733,7 @@ CREATE TABLE raw_trades_closed (
     comment VARCHAR(255),
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500),
-    PRIMARY KEY (platform, position)
+    PRIMARY KEY (platform, position, trade_date)
 ) PARTITION BY RANGE (trade_date);
 
 -- Add comment explaining the nullable account_id
@@ -768,11 +766,10 @@ BEGIN
 END $$;
 
 -- Indexes for raw_trades_closed
-CREATE INDEX idx_raw_trades_closed_account_date ON raw_trades_closed(account_id, trade_date DESC);
+CREATE INDEX idx_raw_trades_closed_account_id ON raw_trades_closed(account_id, trade_date DESC);
 CREATE INDEX idx_raw_trades_closed_symbol ON raw_trades_closed(std_symbol, trade_date DESC) WHERE std_symbol IS NOT NULL;
 CREATE INDEX idx_raw_trades_closed_profit ON raw_trades_closed(profit DESC, trade_date DESC);
-CREATE INDEX idx_raw_trades_closed_trade_id ON raw_trades_closed(trade_id);
-CREATE INDEX idx_raw_trades_closed_login ON raw_trades_closed(login); -- For account_id resolution
+CREATE INDEX idx_raw_trades_closed_login_platform_broker ON raw_trades_closed(login, platform, broker);
 
 -- Raw trades open
 CREATE TABLE raw_trades_open (
@@ -794,28 +791,25 @@ CREATE TABLE raw_trades_open (
     take_profit DECIMAL(18, 6),
     open_time TIMESTAMP,
     open_price DECIMAL(18, 6),
-    close_time TIMESTAMP,
-    close_price DECIMAL(18, 6),
     duration DECIMAL(18, 2),
-    profit DECIMAL(18, 2),
+    unrealized_profit DECIMAL(18, 2),
     commission DECIMAL(18, 2),
     fee DECIMAL(18, 2),
     swap DECIMAL(18, 2),
     comment VARCHAR(255),
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500),
-    PRIMARY KEY (platform, position)
+    PRIMARY KEY (platform, position, trade_date)
 ) PARTITION BY RANGE (trade_date);
 
 -- Add comment explaining the nullable account_id
 COMMENT ON COLUMN raw_trades_open.account_id IS 'Account ID - may be temporarily set to login value until proper resolution with platform/mt_version is implemented';
 
 -- Indexes for raw_trades_open
-CREATE INDEX idx_raw_trades_open_account_id ON raw_trades_open(account_id);
-CREATE INDEX idx_raw_trades_open_trade_id ON raw_trades_open(trade_id);
-CREATE INDEX idx_raw_trades_open_symbol ON raw_trades_open(std_symbol) WHERE std_symbol IS NOT NULL;
-CREATE INDEX idx_raw_trades_open_ingestion ON raw_trades_open(ingestion_timestamp DESC);
-CREATE INDEX idx_raw_trades_open_login ON raw_trades_open(login); -- For account_id resolution
+CREATE INDEX idx_raw_trades_open_account_id ON raw_trades_open(account_id, trade_date DESC);
+CREATE INDEX idx_raw_trades_open_symbol ON raw_trades_open(std_symbol, trade_date DESC) WHERE std_symbol IS NOT NULL;
+CREATE INDEX idx_raw_trades_open_profit ON raw_trades_open(profit DESC, trade_date DESC);
+CREATE INDEX idx_raw_trades_open_login_platform_broker ON raw_trades_open(login, platform, broker);
 
 -- Raw plans data
 CREATE TABLE raw_plans_data (
@@ -1220,11 +1214,11 @@ SELECT
     COALESCE(m.net_profit, 0) as lifetime_profit,
     COALESCE(m.gross_profit, 0) as lifetime_gross_profit,
     COALESCE(m.gross_loss, 0) as lifetime_gross_loss,
-    COALESCE(m.win_rate, 0) as lifetime_win_rate,
+    COALESCE(m.success_rate, 0) as lifetime_win_rate,
     COALESCE(m.profit_factor, 0) as lifetime_profit_factor,
-    COALESCE(m.sharpe_ratio, 0) as lifetime_sharpe_ratio,
-    COALESCE(m.sortino_ratio, 0) as lifetime_sortino_ratio,
-    COALESCE(m.max_drawdown_pct, 0) as lifetime_max_drawdown_pct,
+    COALESCE(m.daily_sharpe, 0) as lifetime_sharpe_ratio,
+    COALESCE(m.daily_sortino, 0) as lifetime_sortino_ratio,
+    COALESCE(m.rel_max_drawdown, 0) as lifetime_max_drawdown_pct,
     -- Recent performance (30 days)
     COALESCE(daily.trades_last_30d, 0) as trades_last_30d,
     COALESCE(daily.profit_last_30d, 0) as profit_last_30d,
@@ -1266,7 +1260,7 @@ LEFT JOIN LATERAL (
         COUNT(DISTINCT date) as trading_days_last_30d,
         CASE 
             WHEN SUM(num_trades) > 0 
-            THEN SUM(winning_trades)::DECIMAL / SUM(num_trades) * 100
+            THEN SUM(num_trades * success_rate / 100)::DECIMAL / SUM(num_trades) * 100
             ELSE 0 
         END as win_rate_last_30d
     FROM raw_metrics_daily
@@ -1281,7 +1275,7 @@ LEFT JOIN LATERAL (
         SUM(net_profit) as profit_last_7d,
         CASE 
             WHEN SUM(num_trades) > 0 
-            THEN SUM(winning_trades)::DECIMAL / SUM(num_trades) * 100
+            THEN SUM(num_trades * success_rate / 100)::DECIMAL / SUM(num_trades) * 100
             ELSE 0 
         END as win_rate_last_7d
     FROM raw_metrics_daily
@@ -1306,16 +1300,16 @@ SELECT
     COUNT(DISTINCT CASE WHEN net_profit > 0 THEN account_id END) as profitable_accounts,
     COUNT(DISTINCT CASE WHEN net_profit < 0 THEN account_id END) as losing_accounts,
     SUM(num_trades) as num_trades,
-    SUM(winning_trades) as total_winning_trades,
-    SUM(losing_trades) as total_losing_trades,
+    SUM(num_trades * success_rate / 100) as total_winning_trades,
+    SUM(num_trades * (100 - success_rate) / 100) as total_losing_trades,
     SUM(net_profit) as total_profit,
     SUM(gross_profit) as total_gross_profit,
     SUM(gross_loss) as total_gross_loss,
     AVG(net_profit) as avg_profit,
     STDDEV(net_profit) as profit_stddev,
-    SUM(volume_traded) as total_volume,
-    SUM(lots_traded) as total_lots,
-    AVG(win_rate) as avg_win_rate,
+    SUM(total_volume) as total_volume,
+    SUM(total_lots) as total_lots,
+    AVG(success_rate) as avg_win_rate,
     PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY net_profit) as median_profit,
     PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY net_profit) as profit_q1,
     PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY net_profit) as profit_q3,
@@ -1474,8 +1468,8 @@ SELECT
     SUM(m.net_profit) as total_profit,
     AVG(m.net_profit) as avg_profit,
     STDDEV(m.net_profit) as profit_stddev,
-    AVG(m.win_rate) as avg_win_rate,
-    SUM(m.volume_traded) as total_volume,
+    AVG(m.success_rate) as avg_win_rate,
+    SUM(m.total_volume) as total_volume,
     PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY m.net_profit) as median_profit,
     COUNT(DISTINCT CASE WHEN m.net_profit > 0 THEN m.account_id END) as profitable_accounts,
     CURRENT_TIMESTAMP as mv_refreshed_at

@@ -161,10 +161,9 @@ VALID_FIELDS = {
     },
     "trades": {
         "tradeDate", "broker", "mngr", "platform", "ticket", "position", "login",
-        "trdSymbol", "stdSymbol", "side", "lots", "contractSize", "qtyInBaseCrncy",
-        "volumeUSD", "stopLoss", "takeProfit", "openTime", "openPrice", "closeTime",
-        "closePrice", "duration", "profit", "commission", "fee", "swap", "comment",
-        "client_margin", "firm_margin"
+        "stdSymbol", "side", "lots", "contractSize", "qtyInBaseCrncy", "volumeUSD",
+        "stopLoss", "takeProfit", "openTime", "openPrice", "closeTime", "closePrice",
+        "duration", "profit", "commission", "fee", "swap", "comment"
     },
     # Plans are from CSV, fields will be validated differently
     "plans": set()  # This will be populated from actual CSV headers when available
@@ -326,7 +325,7 @@ class TestDataStructureFieldValidation:
                 'api_calls', 'api_errors', 'db_errors', 'validation_errors',
                 'processing_time', 'records_per_second', 'seen_records',
                 # Database operation fields
-                'account_id', 'trade_id', 'metric_id', 'plan_id', 'regime_id',
+                'account_id', 'metric_id', 'plan_id', 'regime_id',
                 'record_id', 'row_id', 'batch_data', 'batch_records',
                 'insert', 'update', 'upsert', 'delete', 'truncate',
                 'execute_command', 'executemany', 'get_connection',
@@ -342,7 +341,8 @@ class TestDataStructureFieldValidation:
                 # Database column mapping fields (transformations of API fields)
                 'close_price', 'open_price', 'close_time', 'open_time',
                 'current_price', 'unrealized_pnl', 'std_symbol', 'symbol',
-                'stop_loss', 'take_profit', 'volume_usd', 'trade_date',
+                'stop_loss', 'take_profit', 'volume_usd', 'trade_date', 'contract_size',
+                'qty_in_base_ccy', 'duration', 'fee', 'swap', 'unrealized_profit', "manager",
                 # Metric-specific transformation fields
                 'balance_start', 'balance_end', 'equity_start', 'equity_end',
                 'lots_traded', 'volume_traded', 'num_trades', 'win_rate',

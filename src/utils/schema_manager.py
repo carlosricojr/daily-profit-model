@@ -152,7 +152,6 @@ class SchemaManager:
         # Handle regular tables
         pattern = r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(\w+)\.)?(\w+)\s*\((.*?)\)(?:\s+PARTITION\s+BY\s+.*?)?;'
         for match in re.finditer(pattern, content, re.IGNORECASE | re.DOTALL):
-            schema = match.group(1) or self.schema_name
             name = match.group(2)
             definition = match.group(0)
             
@@ -408,7 +407,6 @@ class SchemaManager:
                 # Get indexes (excluding those on partition/system tables and constraint-backed indexes)
                 all_exclusions = exclude_tables + exclude_indexes
                 if all_exclusions:
-                    all_exclusions_placeholder = ','.join(['%s'] * len(all_exclusions))
                     cursor.execute(f"""
                         SELECT indexname, indexdef
                         FROM pg_indexes

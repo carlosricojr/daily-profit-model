@@ -17,15 +17,35 @@ def test_validation():
 
     # Test valid trade (using actual API field names)
     valid_trade = {
-        "position": "W89948879651022156",  # This is the unique ID
-        "login": "80039260",
-        "stdSymbol": "EURUSD",  # This is what we use for symbol
-        "side": "Buy",
-        "openTime": "2024-01-15T10:00:00Z",
-        "closeTime": "2024-01-15T11:00:00Z",
-        "profit": 100.0,
-        "lots": 0.1,
-    }
+        "tradeDate": "2025-06-01T00:00:00.000Z",
+        "broker": 4,
+        "mngr": 201,
+        "platform": 8,
+        "ticket": "W8994887965912253",
+        "position": "W8994887965912253",
+        "login": "25011525",
+        "trdSymbol": "BTCUSD",
+        "stdSymbol": "BTCUSD",
+        "side": "Sell",
+        "lots": 0.9,
+        "contractSize": 1,
+        "qtyInBaseCrncy": 0.9,
+        "volumeUSD": 94496.1,
+        "stopLoss": None,
+        "takeProfit": None,
+        "openTime": "2025-05-31T04:55:46.978Z",
+        "openPrice": 103387.2,
+        "closeTime": "2025-06-01T00:06:00.721Z",
+        "closePrice": 104995.67,
+        "duration": 19.170484166666668,
+        "profit": -1447.62,
+        "commission": 0,
+        "fee": 0,
+        "swap": 0,
+        "comment": None,
+        "client_margin": 4724.805,
+        "firm_margin": 188.99220000000003
+      }
 
     is_valid, errors = ingester._validate_trade_record(valid_trade, "closed")
     print(f"Valid trade validation: {is_valid}, errors: {errors}")

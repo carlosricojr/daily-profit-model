@@ -48,14 +48,14 @@ BEGIN
             CREATE INDEX CONCURRENTLY IF NOT EXISTS %I ON prop_trading_model.%I (login);
             CREATE INDEX CONCURRENTLY IF NOT EXISTS %I ON prop_trading_model.%I (std_symbol) WHERE std_symbol IS NOT NULL;
             CREATE INDEX CONCURRENTLY IF NOT EXISTS %I ON prop_trading_model.%I (profit) WHERE profit != 0;
-            CREATE INDEX CONCURRENTLY IF NOT EXISTS %I ON prop_trading_model.%I (trade_id);',
+            CREATE INDEX CONCURRENTLY IF NOT EXISTS %I ON prop_trading_model.%I (login, platform, broker);',
             'idx_' || p_partition_name || '_account_id', p_partition_name,
             'idx_' || p_partition_name || '_trade_date', p_partition_name,
             'idx_' || p_partition_name || '_account_date', p_partition_name,
             'idx_' || p_partition_name || '_login', p_partition_name,
             'idx_' || p_partition_name || '_symbol', p_partition_name,
             'idx_' || p_partition_name || '_profit', p_partition_name,
-            'idx_' || p_partition_name || '_trade_id', p_partition_name
+            'idx_' || p_partition_name || '_login_platform_broker', p_partition_name
         );
         
     ELSIF p_parent_table = 'raw_metrics_daily' THEN

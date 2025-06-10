@@ -183,6 +183,11 @@ class TradesIngester:
                     table_name, start_date, end_date, logins, symbols
                 )
 
+            # Batch resolve account IDs after ingestion
+            logger.info(f"Starting batch account_id resolution for {trade_type} trades")
+            trades_updated = self._batch_resolve_account_ids(table_name)
+            logger.info(f"Account resolution complete: {trades_updated} trades updated")
+
             # Calculate final metrics
             self.metrics.processing_time = (datetime.now() - start_time).total_seconds()
             self.metrics.calculate_rate()
@@ -406,30 +411,38 @@ class TradesIngester:
         if trade_date_str:
             try:
                 trade_date = datetime.strptime(trade_date_str[:10], "%Y-%m-%d").date()
-            except:
+            except (ValueError, TypeError, IndexError):
                 trade_date = None
         else:
             trade_date = None
 
         return {
-            "trade_id": trade.get("position"),  # position is the unique identifier
-            "account_id": self._resolve_account_id(trade),
+            "trade_date": trade_date,
+            "broker": trade.get("broker"),
+            "manager": trade.get("mngr"),
+            "platform": trade.get("platform"),
+            "ticket": trade.get("ticket"),
+            "position": trade.get("position"),
             "login": trade.get("login"),
-            "symbol": trade.get("stdSymbol"),  # use stdSymbol for symbol field
+            "account_id": None,
             "std_symbol": trade.get("stdSymbol"),
             "side": trade.get("side"),
-            "open_time": open_time,
-            "close_time": close_time,
-            "trade_date": trade_date,
-            "open_price": self._safe_float(trade.get("openPrice")),
-            "close_price": self._safe_float(trade.get("closePrice")),
+            "lots": self._safe_float(trade.get("lots")),
+            "contract_size": trade.get("contractSize"),
+            "qty_in_base_ccy": trade.get("qtyInBaseCrncy"),
+            "volume_usd": self._safe_float(trade.get("volumeUSD")),
             "stop_loss": self._safe_float(trade.get("stopLoss")),
             "take_profit": self._safe_float(trade.get("takeProfit")),
-            "lots": self._safe_float(trade.get("lots")),
-            "volume_usd": self._safe_float(trade.get("volumeUSD")),
+            "open_time": open_time,
+            "open_price": self._safe_float(trade.get("openPrice")),
+            "close_time": close_time,
+            "close_price": self._safe_float(trade.get("closePrice")),
+            "duration": self._safe_float(trade.get("duration")),
             "profit": self._safe_float(trade.get("profit")),
             "commission": self._safe_float(trade.get("commission")),
+            "fee": self._safe_float(trade.get("fee")),
             "swap": self._safe_float(trade.get("swap")),
+            "comment": trade.get("comment"),
             "ingestion_timestamp": datetime.now(),
             "source_api_endpoint": "/v2/trades/closed",
         }
@@ -444,29 +457,36 @@ class TradesIngester:
         if trade_date_str:
             try:
                 trade_date = datetime.strptime(trade_date_str[:10], "%Y-%m-%d").date()
-            except:
+            except (ValueError, TypeError, IndexError):
                 trade_date = None
         else:
             trade_date = None
 
         return {
-            "trade_id": trade.get("position"),  # position is the unique identifier
-            "account_id": self._resolve_account_id(trade),
+            "trade_date": trade_date,
+            "broker": trade.get("broker"),
+            "manager": trade.get("mngr"),
+            "platform": trade.get("platform"),
+            "ticket": trade.get("ticket"),
+            "position": trade.get("position"),
             "login": trade.get("login"),
-            "symbol": trade.get("stdSymbol"),  # use stdSymbol for symbol field
+            "account_id": None,
             "std_symbol": trade.get("stdSymbol"),
             "side": trade.get("side"),
-            "open_time": open_time,
-            "trade_date": trade_date,
-            "open_price": self._safe_float(trade.get("openPrice")),
-            "current_price": self._safe_float(trade.get("closePrice")),  # closePrice is current price for open trades
+            "lots": self._safe_float(trade.get("lots")),
+            "contract_size": trade.get("contractSize"),
+            "qty_in_base_ccy": trade.get("qtyInBaseCrncy"),
+            "volume_usd": self._safe_float(trade.get("volumeUSD")),
             "stop_loss": self._safe_float(trade.get("stopLoss")),
             "take_profit": self._safe_float(trade.get("takeProfit")),
-            "lots": self._safe_float(trade.get("lots")),
-            "volume_usd": self._safe_float(trade.get("volumeUSD")),
-            "unrealized_pnl": self._safe_float(trade.get("profit")),  # profit field for open trades
+            "open_time": open_time,
+            "open_price": self._safe_float(trade.get("openPrice")),
+            "duration": self._safe_float(trade.get("duration")),
+            "unrealized_profit": self._safe_float(trade.get("profit")),
             "commission": self._safe_float(trade.get("commission")),
+            "fee": self._safe_float(trade.get("fee")),
             "swap": self._safe_float(trade.get("swap")),
+            "comment": trade.get("comment"),
             "ingestion_timestamp": datetime.now(),
             "source_api_endpoint": "/v2/trades/open",
         }
@@ -479,17 +499,38 @@ class TradesIngester:
 
         # Required fields - updated to match actual API response
         required_fields = [
-            "position",  # unique identifier for trades
+            "tradeDate",
+            "broker",
+            "mngr",
+            "platform",
+            "ticket",
+            "position",
             "login",
-            "stdSymbol",  # standardized symbol
+            "trdSymbol",
+            "stdSymbol",
             "side",
+            "lots",
+            "contractSize",
+            "qtyInBaseCrncy",
+            "volumeUSD",
+            "stopLoss",
+            "takeProfit",
             "openTime",
+            "openPrice",
+            "closeTime",
+            "closePrice",
+            "duration",
+            "profit",
+            "commission",
+            "fee",
+            "swap",
+            "comment",
+            "client_margin",
+            "firm_margin",
         ]
-        if trade_type == "closed":
-            required_fields.extend(["closeTime", "profit"])
 
         for field in required_fields:
-            if not trade.get(field):
+            if field not in trade:
                 errors.append(f"Missing required field: {field}")
 
         # Validate numeric fields
@@ -502,7 +543,7 @@ class TradesIngester:
                 errors.append("Invalid lots value")
 
         # Validate side
-        if trade.get("side") and str(trade["side"]).lower() not in ["buy", "sell"]:
+        if trade.get("side") and str(trade["side"]).lower() not in ["Buy", "Sell", "buy", "sell", "BUY", "SELL"]:
             errors.append(f"Invalid side: {trade.get('side')}")
 
         # Validate timestamps
@@ -529,15 +570,102 @@ class TradesIngester:
         except (ValueError, TypeError):
             return None
 
-    def _resolve_account_id(self, trade: Dict[str, Any]) -> str:
+    def _batch_resolve_account_ids(self, table_name: str) -> int:
         """
-        Resolve account_id from login and platform.
-        For now, return login as account_id since we don't have platform/mt_version mapping yet.
-        TODO: Implement proper mapping when platform/mt_version data is available.
+        Batch resolve account IDs for trades that don't have them.
+        Groups trades by (login, platform, broker) and looks up account_id from raw_metrics_alltime.
+        Returns the number of trades updated.
         """
-        # In the future, this should query raw_accounts_data based on login and platform
-        # to get the correct account_id when multiple accounts share the same login
-        return trade.get("login", "")
+        try:
+            with self.db_manager.model_db.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    # First check if there are any trades needing resolution
+                    cursor.execute(f"""
+                        SELECT COUNT(*)
+                        FROM {table_name}
+                        WHERE account_id IS NULL
+                        AND login IS NOT NULL
+                        AND platform IS NOT NULL
+                        AND broker IS NOT NULL
+                        LIMIT 1
+                    """)
+                    
+                    if cursor.fetchone()[0] == 0:
+                        logger.info("No trades need account_id resolution")
+                        return 0
+                    
+                    # Use a more efficient approach: join directly with raw_metrics_alltime
+                    # This avoids loading all distinct combinations into memory
+                    logger.info("Performing batch account_id resolution using direct UPDATE JOIN")
+                    
+                    cursor.execute(f"""
+                        UPDATE {table_name} t
+                        SET account_id = m.account_id
+                        FROM raw_metrics_alltime m
+                        WHERE t.login = m.login
+                        AND t.platform = m.platform
+                        AND t.broker = m.broker
+                        AND t.account_id IS NULL
+                        AND t.login IS NOT NULL
+                        AND t.platform IS NOT NULL
+                        AND t.broker IS NOT NULL
+                    """)
+                    
+                    updated_count = cursor.rowcount
+                    conn.commit()
+                    
+                    logger.info(f"Successfully updated account_id for {updated_count:,} trades")
+                    
+                    # Now check for any remaining trades without account_id (failed lookups)
+                    cursor.execute(f"""
+                        SELECT DISTINCT login, platform, broker
+                        FROM {table_name}
+                        WHERE account_id IS NULL
+                        AND login IS NOT NULL
+                        AND platform IS NOT NULL
+                        AND broker IS NOT NULL
+                        LIMIT 100
+                    """)
+                    
+                    missing_mappings = cursor.fetchall()
+                    
+                    if missing_mappings:
+                        logger.warning(
+                            f"Found {len(missing_mappings)} unique (login, platform, broker) combinations "
+                            f"without matching account_id in raw_metrics_alltime. "
+                            f"These trades will remain without account_id."
+                        )
+                        # Log a sample of failed lookups for debugging
+                        for login, platform, broker in missing_mappings[:5]:
+                            logger.debug(f"No account_id found for: login={login}, platform={platform}, broker={broker}")
+                        if len(missing_mappings) > 5:
+                            logger.debug(f"... and {len(missing_mappings) - 5} more")
+                    
+                    # Validate that no (login, platform, broker) maps to multiple account_ids
+                    logger.info("Validating account_id uniqueness constraints")
+                    cursor.execute("""
+                        SELECT login, platform, broker, COUNT(DISTINCT account_id) as account_count
+                        FROM raw_metrics_alltime
+                        WHERE login IS NOT NULL 
+                        AND platform IS NOT NULL 
+                        AND broker IS NOT NULL
+                        GROUP BY login, platform, broker
+                        HAVING COUNT(DISTINCT account_id) > 1
+                        LIMIT 10
+                    """)
+                    
+                    duplicates = cursor.fetchall()
+                    if duplicates:
+                        error_msg = "Multiple account_ids found for the following (login, platform, broker) combinations:\n"
+                        for login, platform, broker, count in duplicates:
+                            error_msg += f"  - login={login}, platform={platform}, broker={broker}: {count} account_ids\n"
+                        raise AssertionError(error_msg)
+                    
+                    return updated_count
+                    
+        except Exception as e:
+            logger.error(f"Failed to batch resolve account IDs: {str(e)}")
+            raise
 
     def _parse_timestamp(self, timestamp_str: Optional[str]) -> Optional[datetime]:
         """Parse various timestamp formats from the API."""
@@ -591,15 +719,15 @@ class TradesIngester:
             """
 
             # Use ON CONFLICT to handle duplicates gracefully
-            # Using composite key from schema: (trade_id, account_id, trade_date) for closed trades
+            # Using composite key from schema: (platform, position, trade_date) for closed trades
             if table_name == "raw_trades_closed":
                 query += """
-                ON CONFLICT (trade_id, account_id, trade_date) DO NOTHING
+                ON CONFLICT (platform, position, trade_date) DO NOTHING
                 """
             else:
-                # For open trades: (trade_id, account_id, ingestion_timestamp)
+                # For open trades: (platform, position, ingestion_timestamp)
                 query += """
-                ON CONFLICT (trade_id, account_id, ingestion_timestamp) DO NOTHING
+                ON CONFLICT (platform, position, ingestion_timestamp) DO NOTHING
                 """
 
             # Convert to list of tuples

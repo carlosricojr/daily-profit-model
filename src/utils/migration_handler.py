@@ -220,7 +220,7 @@ class MigrationHandler:
                             ON CONFLICT (migration_name) DO UPDATE
                             SET success = FALSE, error_message = EXCLUDED.error_message
                         """, (name, checksum, str(e)))
-            except:
+            except Exception:
                 pass  # Don't fail if we can't record the failure
                 
             raise

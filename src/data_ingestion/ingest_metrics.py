@@ -103,7 +103,7 @@ class MetricsIngester(BaseIngester):
             'type': 'type',
             'phase': 'phase',
             'broker': 'broker',
-            'mt_version': 'mt_version',
+            'mt_version': 'platform',
             'price_stream': 'price_stream',
             'country': 'country'
         }
@@ -419,9 +419,9 @@ class MetricsIngester(BaseIngester):
                 value = metric.get(api_field)
                 
                 # Handle specific data types
-                if db_field in ['login', 'account_id', 'plan_id', 'trader_id', 'country', 'most_traded_symbol']:
+                if db_field in ['login', 'account_id', 'trader_id', 'country', 'most_traded_symbol']:
                     record[db_field] = str(value) if value is not None else None
-                elif db_field in ['status', 'type', 'phase', 'broker', 'mt_version', 'price_stream',
+                elif db_field in ['plan_id', 'status', 'type', 'phase', 'broker', 'platform', 'price_stream',
                                 'days_since_initial_deposit', 'days_since_first_trade', 'num_trades',
                                 'max_num_trades_in_dd',  # Only max is integer
                                 'median_num_consec_wins', 'max_num_consec_wins',
@@ -478,9 +478,9 @@ class MetricsIngester(BaseIngester):
                 value = metric.get(api_field)
                 
                 # Handle specific data types
-                if db_field in ['login', 'account_id', 'plan_id', 'trader_id', 'country', 'most_traded_symbol']:
+                if db_field in ['login', 'account_id', 'trader_id', 'country', 'most_traded_symbol']:
                     record[db_field] = str(value) if value is not None else None
-                elif db_field in ['status', 'type', 'phase', 'broker', 'mt_version', 'price_stream',
+                elif db_field in ['plan_id', 'status', 'type', 'phase', 'broker', 'platform', 'price_stream',
                                 'days_since_initial_deposit', 'days_since_first_trade', 'num_trades',
                                 'days_to_next_payout',  # ADDED: New daily-specific field
                                 'max_num_trades_in_dd',  # Only max is integer
@@ -558,9 +558,9 @@ class MetricsIngester(BaseIngester):
                 value = metric.get(api_field)
                 
                 # Handle specific data types
-                if db_field in ['login', 'account_id', 'plan_id', 'trader_id', 'country', 'most_traded_symbol']:
+                if db_field in ['login', 'account_id', 'trader_id', 'country', 'most_traded_symbol']:
                     record[db_field] = str(value) if value is not None else None
-                elif db_field in ['status', 'type', 'phase', 'broker', 'mt_version', 'price_stream',
+                elif db_field in ['plan_id', 'status', 'type', 'phase', 'broker', 'platform', 'price_stream',
                                 'days_since_initial_deposit', 'days_since_first_trade', 'num_trades',
                                 'days_to_next_payout',  # Hourly-specific field
                                 'max_num_trades_in_dd',  # Only max is integer

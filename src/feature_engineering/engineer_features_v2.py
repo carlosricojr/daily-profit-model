@@ -622,9 +622,7 @@ class EnhancedFeatureEngineerV2(OptimizedFeatureEngineer):
         """Calculate skewness from profit distribution percentiles."""
         try:
             p10 = daily_data.get("profit_perc_10", 0)
-            p25 = daily_data.get("profit_perc_25", 0)
             p50 = daily_data.get("median_profit", 0)
-            p75 = daily_data.get("profit_perc_75", 0)
             p90 = daily_data.get("profit_perc_90", 0)
             
             # Simplified skewness calculation using percentiles
@@ -635,7 +633,7 @@ class EnhancedFeatureEngineerV2(OptimizedFeatureEngineer):
             if upper_tail + lower_tail > 0:
                 return (upper_tail - lower_tail) / (upper_tail + lower_tail)
             return 0.0
-        except:
+        except Exception:
             return 0.0
 
     def _calculate_kurtosis(self, daily_data: Dict) -> float:
@@ -653,7 +651,7 @@ class EnhancedFeatureEngineerV2(OptimizedFeatureEngineer):
             if iqr > 0:
                 return full_range / iqr - 2.91  # Normalize to normal distribution
             return 0.0
-        except:
+        except Exception:
             return 0.0
 
     def _calculate_tail_ratio(self, daily_data: Dict) -> float:
@@ -665,7 +663,7 @@ class EnhancedFeatureEngineerV2(OptimizedFeatureEngineer):
             if p10 > 0:
                 return p90 / p10
             return 0.0
-        except:
+        except Exception:
             return 0.0
 
     def engineer_features_enhanced(

@@ -613,18 +613,31 @@ class OptimizedFeatureEngineer:
 
         query = """
         SELECT 
-            account_id,
             trade_date,
-            trade_id,
-            symbol,
+            broker,
+            manager,
+            platform,
+            login,
+            account_id,
             std_symbol,
             side,
-            open_time,
-            close_time,
+            lots,
+            contract_size,
+            qty_in_base_ccy,
+            volume_usd,
             stop_loss,
             take_profit,
-            lots,
-            volume_usd
+            open_time,
+            open_price,
+            close_time,
+            close_price,
+            duration,
+            profit,
+            commission,
+            fee,
+            swap,
+            comment
+            
         FROM raw_trades_closed
         WHERE account_id = ANY(%s) 
             AND trade_date >= %s 

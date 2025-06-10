@@ -769,7 +769,7 @@ class TestSchemaManager:
                         mock_cursor.fetchone.return_value = (False,)
                         mock_db_manager.model_db.get_connection.return_value = mock_conn
                         
-                        result = schema_manager.ensure_schema_compliance(
+                        schema_manager.ensure_schema_compliance(
                             schema_path=schema_file,
                             preserve_data=True,
                             dry_run=False
@@ -804,7 +804,6 @@ class TestSchemaIntegration:
         assert content.count('"') % 2 == 0  # Even number of double quotes
         
         # Check for required tables
-        assert 'CREATE TABLE raw_accounts_data' in content
         assert 'CREATE TABLE raw_metrics_daily' in content
         assert 'CREATE TABLE raw_trades_closed' in content
         assert 'CREATE TABLE feature_store_account_daily' in content
@@ -828,7 +827,6 @@ class TestSchemaIntegration:
         
         # Required tables
         required_tables = [
-            'raw_accounts_data',
             'raw_metrics_alltime',
             'raw_metrics_daily',
             'raw_metrics_hourly',
@@ -881,9 +879,6 @@ class TestSchemaIntegration:
         
         # Check for primary keys
         assert 'PRIMARY KEY' in content
-        
-        # Check for foreign keys (if any)
-        # assert 'REFERENCES' in content
         
         # Check for check constraints
         assert 'CHECK' in content
