@@ -27,99 +27,440 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;  -- For exclusion constraints
 -- Raw Data Tables (Data Ingestion Layer)
 -- ========================================
 
--- Raw accounts data from /accounts API
-CREATE TABLE raw_accounts_data (
-    id SERIAL PRIMARY KEY,
-    account_id VARCHAR(255) NOT NULL,
-    login VARCHAR(255) NOT NULL,
-    trader_id VARCHAR(255),
-    plan_id VARCHAR(255),
-    starting_balance DECIMAL(18, 2) CHECK (starting_balance >= 0),
-    current_balance DECIMAL(18, 2),
-    current_equity DECIMAL(18, 2),
-    profit_target_pct DECIMAL(5, 2) CHECK (profit_target_pct >= 0 AND profit_target_pct <= 100),
-    max_daily_drawdown_pct DECIMAL(5, 2) CHECK (max_daily_drawdown_pct >= 0 AND max_daily_drawdown_pct <= 100),
-    max_drawdown_pct DECIMAL(5, 2) CHECK (max_drawdown_pct >= 0 AND max_drawdown_pct <= 100),
-    max_leverage DECIMAL(10, 2) CHECK (max_leverage > 0),
-    is_drawdown_relative BOOLEAN DEFAULT FALSE,
-    breached INTEGER DEFAULT 0 CHECK (breached IN (0, 1)),
-    is_upgraded INTEGER DEFAULT 0 CHECK (is_upgraded IN (0, 1)),
-    phase VARCHAR(50) CHECK (phase IN ('Phase 1', 'Phase 2', 'Funded', 'Demo')),
-    status VARCHAR(50) CHECK (status IN ('Active', 'Inactive', 'Breached', 'Passed')),
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP,
-    ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    source_api_endpoint VARCHAR(500),
-    UNIQUE(account_id, ingestion_timestamp)
-);
-
--- Indexes for raw_accounts_data
-CREATE INDEX idx_raw_accounts_account_id ON raw_accounts_data(account_id);
-CREATE INDEX idx_raw_accounts_login ON raw_accounts_data(login);
-CREATE INDEX idx_raw_accounts_trader_id ON raw_accounts_data(trader_id) WHERE trader_id IS NOT NULL;
-CREATE INDEX idx_raw_accounts_plan_id ON raw_accounts_data(plan_id) WHERE plan_id IS NOT NULL;
-CREATE INDEX idx_raw_accounts_ingestion ON raw_accounts_data(ingestion_timestamp DESC);
-CREATE INDEX idx_raw_accounts_status ON raw_accounts_data(status) WHERE status = 'Active';
-CREATE INDEX idx_raw_accounts_phase ON raw_accounts_data(phase);
-CREATE INDEX idx_raw_accounts_updated ON raw_accounts_data(updated_at DESC) WHERE updated_at IS NOT NULL;
-
 -- Raw metrics alltime data from /metrics/alltime API
 CREATE TABLE raw_metrics_alltime (
-    id SERIAL PRIMARY KEY,
-    account_id VARCHAR(255) NOT NULL,
     login VARCHAR(255) NOT NULL,
+    account_id VARCHAR(255) NOT NULL PRIMARY KEY,
+    
+    -- Account metadata
+    plan_id VARCHAR(255),
+    trader_id VARCHAR(255),
+    status INTEGER,
+    type INTEGER,
+    phase INTEGER,
+    broker INTEGER,
+    mt_version INTEGER,
+    price_stream INTEGER,
+    country VARCHAR(2),
+    
+    -- Payout tracking
+    approved_payouts DECIMAL(18, 2),
+    pending_payouts DECIMAL(18, 2),
+    
+    -- Balance and equity
+    starting_balance DECIMAL(18, 2),
+    prior_days_balance DECIMAL(18, 2),
+    prior_days_equity DECIMAL(18, 2),
+    current_balance DECIMAL(18, 2),
+    current_equity DECIMAL(18, 2),
+    
+    -- Trading timeline
+    first_trade_date DATE,
+    days_since_initial_deposit INTEGER,
+    days_since_first_trade INTEGER,
+    num_trades INTEGER CHECK (num_trades >= 0),
+    first_trade_open TIMESTAMP,
+    last_trade_open TIMESTAMP,
+    last_trade_close TIMESTAMP,
+    lifetime_in_days DECIMAL(10, 6),
+    
+    -- Core performance metrics
     net_profit DECIMAL(18, 2),
     gross_profit DECIMAL(18, 2) CHECK (gross_profit >= 0),
     gross_loss DECIMAL(18, 2) CHECK (gross_loss <= 0),
-    total_trades INTEGER CHECK (total_trades >= 0),
-    winning_trades INTEGER CHECK (winning_trades >= 0),
-    losing_trades INTEGER CHECK (losing_trades >= 0),
-    win_rate DECIMAL(5, 2) CHECK (win_rate >= 0 AND win_rate <= 100),
+    gain_to_pain DECIMAL(10, 2) CHECK (gain_to_pain >= 0),
     profit_factor DECIMAL(10, 2) CHECK (profit_factor >= 0),
-    average_win DECIMAL(18, 2),
-    average_loss DECIMAL(18, 2),
-    average_rrr DECIMAL(10, 2),
+    success_rate DECIMAL(5, 2) CHECK (success_rate >= 0 AND success_rate <= 100),
     expectancy DECIMAL(18, 2),
-    sharpe_ratio DECIMAL(10, 2),
-    sortino_ratio DECIMAL(10, 2),
+    
+    -- Enhanced risk metrics (DOUBLE PRECISION for extreme values)
+    mean_profit DECIMAL(18, 2),
+    median_profit DECIMAL(18, 2),
+    std_profits DECIMAL(18, 2),
+    risk_adj_profit DOUBLE PRECISION,
+    
+    -- Profit distribution
+    min_profit DECIMAL(18, 2),
+    max_profit DECIMAL(18, 2),
+    profit_perc_10 DECIMAL(18, 2),
+    profit_perc_25 DECIMAL(18, 2),
+    profit_perc_75 DECIMAL(18, 2),
+    profit_perc_90 DECIMAL(18, 2),
+    
+    -- Outlier analysis
+    profit_top_10_prcnt_trades DECIMAL(18, 2),
+    profit_bottom_10_prcnt_trades DECIMAL(18, 2),
+    top_10_prcnt_profit_contrib DECIMAL(5, 2),
+    bottom_10_prcnt_loss_contrib DECIMAL(5, 2),
+    one_std_outlier_profit DECIMAL(18, 2),
+    one_std_outlier_profit_contrib DECIMAL(10, 6),
+    two_std_outlier_profit DECIMAL(18, 2),
+    two_std_outlier_profit_contrib DECIMAL(10, 6),
+    
+    -- Per-unit profitability (DOUBLE PRECISION for extreme ratios)
+    net_profit_per_usd_volume DOUBLE PRECISION,
+    gross_profit_per_usd_volume DOUBLE PRECISION,
+    gross_loss_per_usd_volume DOUBLE PRECISION,
+    distance_gross_profit_loss_per_usd_volume DOUBLE PRECISION,
+    multiple_gross_profit_loss_per_usd_volume DOUBLE PRECISION,
+    gross_profit_per_lot DECIMAL(18, 6),
+    gross_loss_per_lot DECIMAL(18, 6),
+    distance_gross_profit_loss_per_lot DECIMAL(18, 6),
+    multiple_gross_profit_loss_per_lot DOUBLE PRECISION,
+    
+    -- Duration-based profitability
+    net_profit_per_duration DECIMAL(18, 6),
+    gross_profit_per_duration DECIMAL(18, 6),
+    gross_loss_per_duration DECIMAL(18, 6),
+    
+    -- Return metrics (DOUBLE PRECISION for extreme values)
+    mean_ret DOUBLE PRECISION,
+    std_rets DOUBLE PRECISION,
+    risk_adj_ret DOUBLE PRECISION,
+    downside_std_rets DOUBLE PRECISION,
+    downside_risk_adj_ret DOUBLE PRECISION,
+    total_ret DOUBLE PRECISION,
+    daily_mean_ret DOUBLE PRECISION,
+    daily_std_ret DOUBLE PRECISION,
+    daily_sharpe DOUBLE PRECISION,
+    daily_downside_std_ret DOUBLE PRECISION,
+    daily_sortino DOUBLE PRECISION,
+    
+    -- Relative metrics
+    rel_net_profit DECIMAL(18, 6),
+    rel_gross_profit DECIMAL(18, 6),
+    rel_gross_loss DECIMAL(18, 6),
+    rel_mean_profit DECIMAL(18, 6),
+    rel_median_profit DECIMAL(18, 6),
+    rel_std_profits DECIMAL(18, 6),
+    rel_risk_adj_profit DOUBLE PRECISION,
+    rel_min_profit DECIMAL(18, 6),
+    rel_max_profit DECIMAL(18, 6),
+    rel_profit_perc_10 DECIMAL(18, 6),
+    rel_profit_perc_25 DECIMAL(18, 6),
+    rel_profit_perc_75 DECIMAL(18, 6),
+    rel_profit_perc_90 DECIMAL(18, 6),
+    rel_profit_top_10_prcnt_trades DECIMAL(18, 6),
+    rel_profit_bottom_10_prcnt_trades DECIMAL(18, 6),
+    rel_one_std_outlier_profit DECIMAL(18, 6),
+    rel_two_std_outlier_profit DECIMAL(18, 6),
+    
+    -- Drawdown analysis
+    mean_drawdown DECIMAL(18, 2),
+    median_drawdown DECIMAL(18, 2),
     max_drawdown DECIMAL(18, 2),
-    max_drawdown_pct DECIMAL(5, 2),
+    mean_num_trades_in_dd DECIMAL(18, 2),
+    median_num_trades_in_dd DECIMAL(18, 2),
+    max_num_trades_in_dd INTEGER,
+    rel_mean_drawdown DECIMAL(18, 6),
+    rel_median_drawdown DECIMAL(18, 6),
+    rel_max_drawdown DECIMAL(18, 6),
+    
+    -- Volume and lot metrics
+    total_lots DECIMAL(18, 6),
+    total_volume DECIMAL(18, 2),
+    std_volumes DECIMAL(18, 2),
+    mean_winning_lot DECIMAL(18, 6),
+    mean_losing_lot DECIMAL(18, 6),
+    distance_win_loss_lots DECIMAL(18, 6),
+    multiple_win_loss_lots DECIMAL(10, 6),
+    mean_winning_volume DECIMAL(18, 2),
+    mean_losing_volume DECIMAL(18, 2),
+    distance_win_loss_volume DECIMAL(18, 2),
+    multiple_win_loss_volume DECIMAL(10, 6),
+    
+    -- Duration metrics
+    mean_duration DECIMAL(18, 6),
+    median_duration DECIMAL(18, 6),
+    std_durations DECIMAL(18, 6),
+    min_duration DECIMAL(18, 6),
+    max_duration DECIMAL(18, 6),
+    cv_durations DECIMAL(10, 6),
+    
+    -- Stop loss and take profit metrics
+    mean_tp DECIMAL(18, 6),
+    median_tp DECIMAL(18, 6),
+    std_tp DECIMAL(18, 6),
+    min_tp DECIMAL(18, 6),
+    max_tp DECIMAL(18, 6),
+    cv_tp DECIMAL(10, 6),
+    mean_sl DECIMAL(18, 6),
+    median_sl DECIMAL(18, 6),
+    std_sl DECIMAL(18, 6),
+    min_sl DECIMAL(18, 6),
+    max_sl DECIMAL(18, 6),
+    cv_sl DECIMAL(10, 6),
+    mean_tp_vs_sl DECIMAL(10, 6),
+    median_tp_vs_sl DECIMAL(10, 6),
+    min_tp_vs_sl DECIMAL(10, 6),
+    max_tp_vs_sl DECIMAL(10, 6),
+    cv_tp_vs_sl DECIMAL(10, 6),
+    
+    -- Consecutive wins/losses
+    mean_num_consec_wins DECIMAL(10, 2),
+    median_num_consec_wins INTEGER,
+    max_num_consec_wins INTEGER,
+    mean_num_consec_losses DECIMAL(10, 2),
+    median_num_consec_losses INTEGER,
+    max_num_consec_losses INTEGER,
+    mean_val_consec_wins DECIMAL(18, 2),
+    median_val_consec_wins DECIMAL(18, 2),
+    max_val_consec_wins DECIMAL(18, 2),
+    mean_val_consec_losses DECIMAL(18, 2),
+    median_val_consec_losses DECIMAL(18, 2),
+    max_val_consec_losses DECIMAL(18, 2),
+    
+    -- Open position metrics
+    mean_num_open_pos DECIMAL(10, 2),
+    median_num_open_pos INTEGER,
+    max_num_open_pos INTEGER,
+    mean_val_open_pos DECIMAL(18, 2),
+    median_val_open_pos DECIMAL(18, 2),
+    max_val_open_pos DECIMAL(18, 2),
+    mean_val_to_eqty_open_pos DECIMAL(10, 6),
+    median_val_to_eqty_open_pos DECIMAL(10, 6),
+    max_val_to_eqty_open_pos DECIMAL(10, 6),
+    
+    -- Margin and activity metrics
+    mean_account_margin DECIMAL(18, 2),
+    mean_firm_margin DECIMAL(18, 2),
+    mean_trades_per_day DECIMAL(10, 2),
+    median_trades_per_day INTEGER,
+    min_trades_per_day INTEGER,
+    max_trades_per_day INTEGER,
+    cv_trades_per_day DECIMAL(10, 6),
+    mean_idle_days DECIMAL(10, 2),
+    median_idle_days INTEGER,
+    max_idle_days INTEGER,
+    min_idle_days INTEGER,
+    num_traded_symbols INTEGER,
+    most_traded_symbol VARCHAR(50),
+    most_traded_smb_trades INTEGER,
+    
+    -- Other fields
+    updated_date TIMESTAMP,
+    
+    -- System fields
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500),
-    UNIQUE(account_id, ingestion_timestamp)
+    
+    UNIQUE(account_id)
 );
 
--- Indexes for raw_metrics_alltime
+-- Create indexes for performance
 CREATE INDEX idx_raw_metrics_alltime_account_id ON raw_metrics_alltime(account_id);
 CREATE INDEX idx_raw_metrics_alltime_login ON raw_metrics_alltime(login);
+CREATE INDEX idx_raw_metrics_alltime_plan_id ON raw_metrics_alltime(plan_id);
+CREATE INDEX idx_raw_metrics_alltime_trader_id ON raw_metrics_alltime(trader_id);
 CREATE INDEX idx_raw_metrics_alltime_ingestion ON raw_metrics_alltime(ingestion_timestamp DESC);
 CREATE INDEX idx_raw_metrics_alltime_profit ON raw_metrics_alltime(net_profit DESC) WHERE net_profit IS NOT NULL;
+CREATE INDEX idx_raw_metrics_alltime_sharpe ON raw_metrics_alltime(daily_sharpe DESC) WHERE daily_sharpe IS NOT NULL;
 
 -- Raw metrics daily - PARTITIONED BY RANGE (date) for performance
 CREATE TABLE raw_metrics_daily (
-    id BIGSERIAL,
-    account_id VARCHAR(255) NOT NULL,
-    login VARCHAR(255) NOT NULL,
     date DATE NOT NULL,
+    login VARCHAR(255) NOT NULL,
+    account_id VARCHAR(255) NOT NULL,
+    
+    -- Account metadata
+    plan_id VARCHAR(255),
+    trader_id VARCHAR(255),
+    status INTEGER,
+    type INTEGER,
+    phase INTEGER,
+    broker INTEGER,
+    mt_version INTEGER,
+    price_stream INTEGER,
+    country VARCHAR(2),
+    
+    -- Payout tracking
+    days_to_next_payout INTEGER,
+    todays_payouts DECIMAL(18, 2),
+    approved_payouts DECIMAL(18, 2),
+    pending_payouts DECIMAL(18, 2),
+    
+    -- Balance and equity
+    starting_balance DECIMAL(18, 2),
+    prior_days_balance DECIMAL(18, 2),
+    prior_days_equity DECIMAL(18, 2),
+    current_balance DECIMAL(18, 2),
+    current_equity DECIMAL(18, 2),
+    
+    -- Trading timeline
+    first_trade_date DATE,
+    days_since_initial_deposit INTEGER,
+    days_since_first_trade INTEGER,
+    num_trades INTEGER CHECK (num_trades >= 0),
+    
+    -- Core performance metrics
     net_profit DECIMAL(18, 2),
     gross_profit DECIMAL(18, 2) CHECK (gross_profit >= 0),
     gross_loss DECIMAL(18, 2) CHECK (gross_loss <= 0),
-    total_trades INTEGER CHECK (total_trades >= 0),
-    winning_trades INTEGER CHECK (winning_trades >= 0),
-    losing_trades INTEGER CHECK (losing_trades >= 0),
-    win_rate DECIMAL(5, 2) CHECK (win_rate >= 0 AND win_rate <= 100),
+    gain_to_pain DECIMAL(10, 2) CHECK (gain_to_pain >= 0),
     profit_factor DECIMAL(10, 2) CHECK (profit_factor >= 0),
-    lots_traded DECIMAL(18, 4),
-    volume_traded DECIMAL(20, 2),
-    commission DECIMAL(18, 2),
-    swap DECIMAL(18, 2),
-    balance_start DECIMAL(18, 2),
-    balance_end DECIMAL(18, 2),
-    equity_start DECIMAL(18, 2),
-    equity_end DECIMAL(18, 2),
+    success_rate DECIMAL(5, 2) CHECK (success_rate >= 0 AND success_rate <= 100),
+    expectancy DECIMAL(18, 2),
+    
+    -- Enhanced risk metrics (DOUBLE PRECISION for extreme values)
+    mean_profit DECIMAL(18, 2),
+    median_profit DECIMAL(18, 2),
+    std_profits DECIMAL(18, 2),
+    risk_adj_profit DOUBLE PRECISION,
+    
+    -- Profit distribution
+    min_profit DECIMAL(18, 2),
+    max_profit DECIMAL(18, 2),
+    profit_perc_10 DECIMAL(18, 2),
+    profit_perc_25 DECIMAL(18, 2),
+    profit_perc_75 DECIMAL(18, 2),
+    profit_perc_90 DECIMAL(18, 2),
+    
+    -- Outlier analysis
+    profit_top_10_prcnt_trades DECIMAL(18, 2),
+    profit_bottom_10_prcnt_trades DECIMAL(18, 2),
+    top_10_prcnt_profit_contrib DECIMAL(5, 2),
+    bottom_10_prcnt_loss_contrib DECIMAL(5, 2),
+    one_std_outlier_profit DECIMAL(18, 2),
+    one_std_outlier_profit_contrib DECIMAL(10, 6),
+    two_std_outlier_profit DECIMAL(18, 2),
+    two_std_outlier_profit_contrib DECIMAL(10, 6),
+    
+    -- Per-unit profitability (DOUBLE PRECISION for extreme ratios)
+    net_profit_per_usd_volume DOUBLE PRECISION,
+    gross_profit_per_usd_volume DOUBLE PRECISION,
+    gross_loss_per_usd_volume DOUBLE PRECISION,
+    distance_gross_profit_loss_per_usd_volume DOUBLE PRECISION,
+    multiple_gross_profit_loss_per_usd_volume DOUBLE PRECISION,
+    gross_profit_per_lot DECIMAL(18, 6),
+    gross_loss_per_lot DECIMAL(18, 6),
+    distance_gross_profit_loss_per_lot DECIMAL(18, 6),
+    multiple_gross_profit_loss_per_lot DOUBLE PRECISION,
+    
+    -- Duration-based profitability
+    net_profit_per_duration DECIMAL(18, 6),
+    gross_profit_per_duration DECIMAL(18, 6),
+    gross_loss_per_duration DECIMAL(18, 6),
+    
+    -- Return metrics (DOUBLE PRECISION for extreme values)
+    mean_ret DOUBLE PRECISION,
+    std_rets DOUBLE PRECISION,
+    risk_adj_ret DOUBLE PRECISION,
+    downside_std_rets DOUBLE PRECISION,
+    downside_risk_adj_ret DOUBLE PRECISION,
+    total_ret DOUBLE PRECISION,
+    daily_mean_ret DOUBLE PRECISION,
+    daily_std_ret DOUBLE PRECISION,
+    daily_sharpe DOUBLE PRECISION,
+    daily_downside_std_ret DOUBLE PRECISION,
+    daily_sortino DOUBLE PRECISION,
+    
+    -- Relative metrics
+    rel_net_profit DECIMAL(18, 6),
+    rel_gross_profit DECIMAL(18, 6),
+    rel_gross_loss DECIMAL(18, 6),
+    rel_mean_profit DECIMAL(18, 6),
+    rel_median_profit DECIMAL(18, 6),
+    rel_std_profits DECIMAL(18, 6),
+    rel_risk_adj_profit DOUBLE PRECISION,
+    rel_min_profit DECIMAL(18, 6),
+    rel_max_profit DECIMAL(18, 6),
+    rel_profit_perc_10 DECIMAL(18, 6),
+    rel_profit_perc_25 DECIMAL(18, 6),
+    rel_profit_perc_75 DECIMAL(18, 6),
+    rel_profit_perc_90 DECIMAL(18, 6),
+    rel_profit_top_10_prcnt_trades DECIMAL(18, 6),
+    rel_profit_bottom_10_prcnt_trades DECIMAL(18, 6),
+    rel_one_std_outlier_profit DECIMAL(18, 6),
+    rel_two_std_outlier_profit DECIMAL(18, 6),
+    
+    -- Drawdown analysis
+    mean_drawdown DECIMAL(18, 2),
+    median_drawdown DECIMAL(18, 2),
+    max_drawdown DECIMAL(18, 2),
+    mean_num_trades_in_dd DECIMAL(18, 2),
+    median_num_trades_in_dd DECIMAL(18, 2),
+    max_num_trades_in_dd INTEGER,
+    rel_mean_drawdown DECIMAL(18, 6),
+    rel_median_drawdown DECIMAL(18, 6),
+    rel_max_drawdown DECIMAL(18, 6),
+    
+    -- Volume and lot metrics
+    total_lots DECIMAL(18, 6),
+    total_volume DECIMAL(18, 2),
+    std_volumes DECIMAL(18, 2),
+    mean_winning_lot DECIMAL(18, 6),
+    mean_losing_lot DECIMAL(18, 6),
+    distance_win_loss_lots DECIMAL(18, 6),
+    multiple_win_loss_lots DECIMAL(10, 6),
+    mean_winning_volume DECIMAL(18, 2),
+    mean_losing_volume DECIMAL(18, 2),
+    distance_win_loss_volume DECIMAL(18, 2),
+    multiple_win_loss_volume DECIMAL(10, 6),
+    
+    -- Duration metrics
+    mean_duration DECIMAL(18, 6),
+    median_duration DECIMAL(18, 6),
+    std_durations DECIMAL(18, 6),
+    min_duration DECIMAL(18, 6),
+    max_duration DECIMAL(18, 6),
+    cv_durations DECIMAL(10, 6),
+    
+    -- Stop loss and take profit metrics
+    mean_tp DECIMAL(18, 6),
+    median_tp DECIMAL(18, 6),
+    std_tp DECIMAL(18, 6),
+    min_tp DECIMAL(18, 6),
+    max_tp DECIMAL(18, 6),
+    cv_tp DECIMAL(10, 6),
+    mean_sl DECIMAL(18, 6),
+    median_sl DECIMAL(18, 6),
+    std_sl DECIMAL(18, 6),
+    min_sl DECIMAL(18, 6),
+    max_sl DECIMAL(18, 6),
+    cv_sl DECIMAL(10, 6),
+    mean_tp_vs_sl DECIMAL(10, 6),
+    median_tp_vs_sl DECIMAL(10, 6),
+    min_tp_vs_sl DECIMAL(10, 6),
+    max_tp_vs_sl DECIMAL(10, 6),
+    cv_tp_vs_sl DECIMAL(10, 6),
+    
+    -- Consecutive wins/losses
+    mean_num_consec_wins DECIMAL(10, 2),
+    median_num_consec_wins INTEGER,
+    max_num_consec_wins INTEGER,
+    mean_num_consec_losses DECIMAL(10, 2),
+    median_num_consec_losses INTEGER,
+    max_num_consec_losses INTEGER,
+    mean_val_consec_wins DECIMAL(18, 2),
+    median_val_consec_wins DECIMAL(18, 2),
+    max_val_consec_wins DECIMAL(18, 2),
+    mean_val_consec_losses DECIMAL(18, 2),
+    median_val_consec_losses DECIMAL(18, 2),
+    max_val_consec_losses DECIMAL(18, 2),
+    
+    -- Open position metrics
+    mean_num_open_pos DECIMAL(10, 2),
+    median_num_open_pos INTEGER,
+    max_num_open_pos INTEGER,
+    mean_val_open_pos DECIMAL(18, 2),
+    median_val_open_pos DECIMAL(18, 2),
+    max_val_open_pos DECIMAL(18, 2),
+    mean_val_to_eqty_open_pos DECIMAL(10, 6),
+    median_val_to_eqty_open_pos DECIMAL(10, 6),
+    max_val_to_eqty_open_pos DECIMAL(10, 6),
+    
+    -- Margin and activity metrics
+    mean_account_margin DECIMAL(18, 2),
+    mean_firm_margin DECIMAL(18, 2),
+    num_traded_symbols INTEGER,
+    most_traded_symbol VARCHAR(50),
+    most_traded_smb_trades INTEGER,
+    
+    -- System fields
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500),
-    PRIMARY KEY (account_id, date, ingestion_timestamp)
+    
+    UNIQUE(account_id, date)
 ) PARTITION BY RANGE (date);
 
 -- Create partitions for raw_metrics_daily (last 3 years + future)
@@ -156,53 +497,245 @@ CREATE INDEX idx_raw_metrics_daily_profit ON raw_metrics_daily(date DESC, net_pr
 
 -- Raw metrics hourly
 CREATE TABLE raw_metrics_hourly (
-    id SERIAL PRIMARY KEY,
-    account_id VARCHAR(255) NOT NULL,
-    login VARCHAR(255) NOT NULL,
     date DATE NOT NULL,
-    hour INTEGER NOT NULL CHECK (hour >= 0 AND hour <= 23),
+    datetime TIMESTAMP NOT NULL,
+    hour INTEGER NOT NULL,
+    login VARCHAR(255) NOT NULL,
+    account_id VARCHAR(255) NOT NULL,
+    
+    -- Account metadata
+    plan_id VARCHAR(255),
+    trader_id VARCHAR(255),
+    status INTEGER,
+    type INTEGER,
+    phase INTEGER,
+    broker INTEGER,
+    mt_version INTEGER,
+    price_stream INTEGER,
+    country VARCHAR(2),
+    
+    -- Payout tracking
+    days_to_next_payout INTEGER,
+    todays_payouts DECIMAL(18, 2),
+    approved_payouts DECIMAL(18, 2),
+    pending_payouts DECIMAL(18, 2),
+    
+    -- Balance and equity
+    starting_balance DECIMAL(18, 2),
+    prior_days_balance DECIMAL(18, 2),
+    prior_days_equity DECIMAL(18, 2),
+    current_balance DECIMAL(18, 2),
+    current_equity DECIMAL(18, 2),
+    
+    -- Trading timeline
+    first_trade_date DATE,
+    days_since_initial_deposit INTEGER,
+    days_since_first_trade INTEGER,
+    num_trades INTEGER CHECK (num_trades >= 0),
+    
+    -- Core performance metrics
     net_profit DECIMAL(18, 2),
     gross_profit DECIMAL(18, 2) CHECK (gross_profit >= 0),
     gross_loss DECIMAL(18, 2) CHECK (gross_loss <= 0),
-    total_trades INTEGER CHECK (total_trades >= 0),
-    winning_trades INTEGER CHECK (winning_trades >= 0),
-    losing_trades INTEGER CHECK (losing_trades >= 0),
-    win_rate DECIMAL(5, 2) CHECK (win_rate >= 0 AND win_rate <= 100),
-    lots_traded DECIMAL(18, 4),
-    volume_traded DECIMAL(20, 2),
+    gain_to_pain DECIMAL(10, 2) CHECK (gain_to_pain >= 0),
+    profit_factor DECIMAL(10, 2) CHECK (profit_factor >= 0),
+    success_rate DECIMAL(5, 2) CHECK (success_rate >= 0 AND success_rate <= 100),
+    expectancy DECIMAL(18, 2),
+    
+    -- Enhanced risk metrics (DOUBLE PRECISION for extreme values)
+    mean_profit DECIMAL(18, 2),
+    median_profit DECIMAL(18, 2),
+    std_profits DECIMAL(18, 2),
+    risk_adj_profit DOUBLE PRECISION,
+    
+    -- Profit distribution
+    min_profit DECIMAL(18, 2),
+    max_profit DECIMAL(18, 2),
+    profit_perc_10 DECIMAL(18, 2),
+    profit_perc_25 DECIMAL(18, 2),
+    profit_perc_75 DECIMAL(18, 2),
+    profit_perc_90 DECIMAL(18, 2),
+    
+    -- Outlier analysis
+    profit_top_10_prcnt_trades DECIMAL(18, 2),
+    profit_bottom_10_prcnt_trades DECIMAL(18, 2),
+    top_10_prcnt_profit_contrib DECIMAL(5, 2),
+    bottom_10_prcnt_loss_contrib DECIMAL(5, 2),
+    one_std_outlier_profit DECIMAL(18, 2),
+    one_std_outlier_profit_contrib DECIMAL(10, 6),
+    two_std_outlier_profit DECIMAL(18, 2),
+    two_std_outlier_profit_contrib DECIMAL(10, 6),
+    
+    -- Per-unit profitability (DOUBLE PRECISION for extreme ratios)
+    net_profit_per_usd_volume DOUBLE PRECISION,
+    gross_profit_per_usd_volume DOUBLE PRECISION,
+    gross_loss_per_usd_volume DOUBLE PRECISION,
+    distance_gross_profit_loss_per_usd_volume DOUBLE PRECISION,
+    multiple_gross_profit_loss_per_usd_volume DOUBLE PRECISION,
+    gross_profit_per_lot DECIMAL(18, 6),
+    gross_loss_per_lot DECIMAL(18, 6),
+    distance_gross_profit_loss_per_lot DECIMAL(18, 6),
+    multiple_gross_profit_loss_per_lot DOUBLE PRECISION,
+    
+    -- Duration-based profitability
+    net_profit_per_duration DECIMAL(18, 6),
+    gross_profit_per_duration DECIMAL(18, 6),
+    gross_loss_per_duration DECIMAL(18, 6),
+    
+    -- Return metrics (DOUBLE PRECISION for extreme values)
+    mean_ret DOUBLE PRECISION,
+    std_rets DOUBLE PRECISION,
+    risk_adj_ret DOUBLE PRECISION,
+    downside_std_rets DOUBLE PRECISION,
+    downside_risk_adj_ret DOUBLE PRECISION,
+    
+    -- Relative metrics
+    rel_net_profit DECIMAL(18, 6),
+    rel_gross_profit DECIMAL(18, 6),
+    rel_gross_loss DECIMAL(18, 6),
+    rel_mean_profit DECIMAL(18, 6),
+    rel_median_profit DECIMAL(18, 6),
+    rel_std_profits DECIMAL(18, 6),
+    rel_risk_adj_profit DOUBLE PRECISION,
+    rel_min_profit DECIMAL(18, 6),
+    rel_max_profit DECIMAL(18, 6),
+    rel_profit_perc_10 DECIMAL(18, 6),
+    rel_profit_perc_25 DECIMAL(18, 6),
+    rel_profit_perc_75 DECIMAL(18, 6),
+    rel_profit_perc_90 DECIMAL(18, 6),
+    rel_profit_top_10_prcnt_trades DECIMAL(18, 6),
+    rel_profit_bottom_10_prcnt_trades DECIMAL(18, 6),
+    rel_one_std_outlier_profit DECIMAL(18, 6),
+    rel_two_std_outlier_profit DECIMAL(18, 6),
+    
+    -- Drawdown analysis
+    mean_drawdown DECIMAL(18, 2),
+    median_drawdown DECIMAL(18, 2),
+    max_drawdown DECIMAL(18, 2),
+    mean_num_trades_in_dd DECIMAL(18, 2),
+    median_num_trades_in_dd DECIMAL(18, 2),
+    max_num_trades_in_dd INTEGER,
+    rel_mean_drawdown DECIMAL(18, 6),
+    rel_median_drawdown DECIMAL(18, 6),
+    rel_max_drawdown DECIMAL(18, 6),
+    
+    -- Volume and lot metrics
+    total_lots DECIMAL(18, 6),
+    total_volume DECIMAL(18, 2),
+    std_volumes DECIMAL(18, 2),
+    mean_winning_lot DECIMAL(18, 6),
+    mean_losing_lot DECIMAL(18, 6),
+    distance_win_loss_lots DECIMAL(18, 6),
+    multiple_win_loss_lots DECIMAL(10, 6),
+    mean_winning_volume DECIMAL(18, 2),
+    mean_losing_volume DECIMAL(18, 2),
+    distance_win_loss_volume DECIMAL(18, 2),
+    multiple_win_loss_volume DECIMAL(10, 6),
+    
+    -- Duration metrics
+    mean_duration DECIMAL(18, 6),
+    median_duration DECIMAL(18, 6),
+    std_durations DECIMAL(18, 6),
+    min_duration DECIMAL(18, 6),
+    max_duration DECIMAL(18, 6),
+    cv_durations DECIMAL(10, 6),
+    
+    -- Stop loss and take profit metrics
+    mean_tp DECIMAL(18, 6),
+    median_tp DECIMAL(18, 6),
+    std_tp DECIMAL(18, 6),
+    min_tp DECIMAL(18, 6),
+    max_tp DECIMAL(18, 6),
+    cv_tp DECIMAL(10, 6),
+    mean_sl DECIMAL(18, 6),
+    median_sl DECIMAL(18, 6),
+    std_sl DECIMAL(18, 6),
+    min_sl DECIMAL(18, 6),
+    max_sl DECIMAL(18, 6),
+    cv_sl DECIMAL(10, 6),
+    mean_tp_vs_sl DECIMAL(10, 6),
+    median_tp_vs_sl DECIMAL(10, 6),
+    min_tp_vs_sl DECIMAL(10, 6),
+    max_tp_vs_sl DECIMAL(10, 6),
+    cv_tp_vs_sl DECIMAL(10, 6),
+    
+    -- Consecutive wins/losses
+    mean_num_consec_wins DECIMAL(10, 2),
+    median_num_consec_wins INTEGER,
+    max_num_consec_wins INTEGER,
+    mean_num_consec_losses DECIMAL(10, 2),
+    median_num_consec_losses INTEGER,
+    max_num_consec_losses INTEGER,
+    mean_val_consec_wins DECIMAL(18, 2),
+    median_val_consec_wins DECIMAL(18, 2),
+    max_val_consec_wins DECIMAL(18, 2),
+    mean_val_consec_losses DECIMAL(18, 2),
+    median_val_consec_losses DECIMAL(18, 2),
+    max_val_consec_losses DECIMAL(18, 2),
+    
+    -- Open position metrics
+    mean_num_open_pos DECIMAL(10, 2),
+    median_num_open_pos INTEGER,
+    max_num_open_pos INTEGER,
+    mean_val_open_pos DECIMAL(18, 2),
+    median_val_open_pos DECIMAL(18, 2),
+    max_val_open_pos DECIMAL(18, 2),
+    mean_val_to_eqty_open_pos DECIMAL(10, 6),
+    median_val_to_eqty_open_pos DECIMAL(10, 6),
+    max_val_to_eqty_open_pos DECIMAL(10, 6),
+    
+    -- Margin and activity metrics
+    mean_account_margin DECIMAL(18, 2),
+    mean_firm_margin DECIMAL(18, 2),
+    num_traded_symbols INTEGER,
+    most_traded_symbol VARCHAR(50),
+    most_traded_smb_trades INTEGER,
+    
+    -- System fields
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500),
-    UNIQUE(account_id, date, hour, ingestion_timestamp)
+    UNIQUE(account_id, date, hour),
+    PRIMARY KEY (account_id, date, hour)
 );
 
 -- Indexes for raw_metrics_hourly
 CREATE INDEX idx_raw_metrics_hourly_account_date ON raw_metrics_hourly(account_id, date DESC, hour);
 CREATE INDEX idx_raw_metrics_hourly_date_hour ON raw_metrics_hourly(date DESC, hour);
+CREATE INDEX idx_raw_metrics_hourly_plan_id ON raw_metrics_hourly(plan_id);
+CREATE INDEX idx_raw_metrics_hourly_status_date ON raw_metrics_hourly(status, date DESC, hour);
+CREATE INDEX idx_raw_metrics_hourly_profit ON raw_metrics_hourly(date DESC, hour, net_profit DESC) WHERE net_profit IS NOT NULL;
 
 -- Raw trades closed - PARTITIONED BY RANGE (trade_date)
 CREATE TABLE raw_trades_closed (
-    id BIGSERIAL,
-    account_id VARCHAR(255), -- Nullable to handle cases where we only have login initially
+    trade_date DATE NOT NULL,
+    broker VARCHAR(255),
+    manager VARCHAR(255),
+    platform VARCHAR(255),
+    ticket VARCHAR(255),
+    position VARCHAR(255),
     login VARCHAR(255) NOT NULL,
-    trade_id VARCHAR(255) NOT NULL,
-    symbol VARCHAR(50) NOT NULL,
-    side VARCHAR(10) CHECK (side IN ('buy', 'sell', 'BUY', 'SELL')),
-    open_time TIMESTAMP,
-    close_time TIMESTAMP,
-    open_price DECIMAL(18, 6),
-    close_price DECIMAL(18, 6),
+    account_id VARCHAR(255), -- Nullable to handle cases where we only have login initially
+    std_symbol VARCHAR(50) NOT NULL,
+    side VARCHAR(10) CHECK (side IN ('buy', 'sell', 'BUY', 'SELL', 'Buy', 'Sell')),
     lots DECIMAL(18, 4),
-    volume_usd DECIMAL(20, 2),
-    profit DECIMAL(18, 2),
-    commission DECIMAL(18, 2),
-    swap DECIMAL(18, 2),
+    contract_size DECIMAL(18, 4),
+    qty_in_base_ccy DECIMAL(18, 4),
+    volume_usd DECIMAL(18, 4),
     stop_loss DECIMAL(18, 6),
     take_profit DECIMAL(18, 6),
-    trade_date DATE NOT NULL,
-    std_symbol VARCHAR(50),
+    open_time TIMESTAMP,
+    open_price DECIMAL(18, 6),
+    close_time TIMESTAMP,
+    close_price DECIMAL(18, 6),
+    duration DECIMAL(18, 2),
+    profit DECIMAL(18, 2),
+    commission DECIMAL(18, 2),
+    fee DECIMAL(18, 2),
+    swap DECIMAL(18, 2),
+    comment VARCHAR(255),
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500),
-    PRIMARY KEY (trade_id, account_id, trade_date)
+    PRIMARY KEY (platform, position)
 ) PARTITION BY RANGE (trade_date);
 
 -- Add comment explaining the nullable account_id
@@ -243,25 +776,36 @@ CREATE INDEX idx_raw_trades_closed_login ON raw_trades_closed(login); -- For acc
 
 -- Raw trades open
 CREATE TABLE raw_trades_open (
-    id SERIAL PRIMARY KEY,
-    account_id VARCHAR(255), -- Nullable to handle cases where we only have login initially
+    trade_date DATE NOT NULL,
+    broker VARCHAR(255),
+    manager VARCHAR(255),
+    platform VARCHAR(255),
+    ticket VARCHAR(255),
+    position VARCHAR(255),
     login VARCHAR(255) NOT NULL,
-    trade_id VARCHAR(255) NOT NULL,
-    symbol VARCHAR(50) NOT NULL,
-    side VARCHAR(10) CHECK (side IN ('buy', 'sell', 'BUY', 'SELL')),
-    open_time TIMESTAMP,
-    open_price DECIMAL(18, 6),
-    current_price DECIMAL(18, 6),
+    account_id VARCHAR(255), -- Nullable to handle cases where we only have login initially
+    std_symbol VARCHAR(50) NOT NULL,
+    side VARCHAR(10) CHECK (side IN ('buy', 'sell', 'BUY', 'SELL', 'Buy', 'Sell')),
     lots DECIMAL(18, 4),
-    volume_usd DECIMAL(20, 2),
-    profit DECIMAL(18, 2),
+    contract_size DECIMAL(18, 4),
+    qty_in_base_ccy DECIMAL(18, 4),
+    volume_usd DECIMAL(18, 4),
     stop_loss DECIMAL(18, 6),
     take_profit DECIMAL(18, 6),
-    std_symbol VARCHAR(50),
+    open_time TIMESTAMP,
+    open_price DECIMAL(18, 6),
+    close_time TIMESTAMP,
+    close_price DECIMAL(18, 6),
+    duration DECIMAL(18, 2),
+    profit DECIMAL(18, 2),
+    commission DECIMAL(18, 2),
+    fee DECIMAL(18, 2),
+    swap DECIMAL(18, 2),
+    comment VARCHAR(255),
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500),
-    UNIQUE(trade_id, account_id, ingestion_timestamp)
-);
+    PRIMARY KEY (platform, position)
+) PARTITION BY RANGE (trade_date);
 
 -- Add comment explaining the nullable account_id
 COMMENT ON COLUMN raw_trades_open.account_id IS 'Account ID - may be temporarily set to login value until proper resolution with platform/mt_version is implemented';
@@ -278,6 +822,7 @@ CREATE TABLE raw_plans_data (
     id SERIAL PRIMARY KEY,
     plan_id VARCHAR(255) NOT NULL,
     plan_name VARCHAR(255) NOT NULL,
+    plan_type VARCHAR(100),
     starting_balance DECIMAL(18, 2) CHECK (starting_balance > 0),
     profit_target DECIMAL(18, 2),
     profit_target_pct DECIMAL(5, 2) CHECK (profit_target_pct >= 0 AND profit_target_pct <= 100),
@@ -349,7 +894,10 @@ CREATE TABLE stg_accounts_daily_snapshots (
     max_daily_drawdown_pct DECIMAL(5, 2),
     max_drawdown DECIMAL(18, 2),
     max_drawdown_pct DECIMAL(5, 2),
+    max_leverage DECIMAL(10, 2),
     is_drawdown_relative BOOLEAN,
+    distance_to_profit_target DECIMAL(18, 2),
+    distance_to_max_drawdown DECIMAL(18, 2),
     liquidate_friday BOOLEAN DEFAULT FALSE,
     inactivity_period INTEGER,
     daily_drawdown_by_balance_equity BOOLEAN DEFAULT FALSE,
@@ -374,6 +922,7 @@ CREATE INDEX idx_stg_accounts_daily_status ON stg_accounts_daily_snapshots(statu
 CREATE TABLE feature_store_account_daily (
     id SERIAL PRIMARY KEY,
     account_id VARCHAR(255) NOT NULL,
+    login VARCHAR(255) NOT NULL,
     feature_date DATE NOT NULL,
     
     -- Basic account features
@@ -445,7 +994,7 @@ CREATE TABLE feature_store_account_daily (
     market_trend_regime VARCHAR(50),
     
     -- Target variable
-    will_profit_next_day BOOLEAN,
+    -- will_profit_next_day BOOLEAN, -- Target column not implemented yet
     next_day_profit DECIMAL(18, 2),
     
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -456,7 +1005,7 @@ CREATE TABLE feature_store_account_daily (
 -- Indexes for feature store
 CREATE INDEX idx_feature_store_account_date ON feature_store_account_daily(account_id, feature_date DESC);
 CREATE INDEX idx_feature_store_date ON feature_store_account_daily(feature_date DESC);
-CREATE INDEX idx_feature_store_profit_target ON feature_store_account_daily(will_profit_next_day, feature_date DESC);
+-- CREATE INDEX idx_feature_store_profit_target ON feature_store_account_daily(will_profit_next_day, feature_date DESC); -- Column will_profit_next_day does not exist yet
 
 -- ========================================
 -- Model Management Tables
@@ -465,18 +1014,98 @@ CREATE INDEX idx_feature_store_profit_target ON feature_store_account_daily(will
 -- Model training input tracking
 CREATE TABLE model_training_input (
     id SERIAL PRIMARY KEY,
-    model_version VARCHAR(100) NOT NULL,
-    training_date DATE NOT NULL,
-    feature_start_date DATE NOT NULL,
-    feature_end_date DATE NOT NULL,
-    total_samples INTEGER,
-    positive_samples INTEGER,
-    negative_samples INTEGER,
-    feature_columns TEXT[],
-    hyperparameters JSONB,
-    validation_metrics JSONB,
+    account_id VARCHAR(255) NOT NULL,
+    login VARCHAR(255) NOT NULL,
+    prediction_date DATE NOT NULL,
+    feature_date DATE NOT NULL,
+    
+    -- Static features
+    starting_balance DECIMAL(18, 2),
+    max_daily_drawdown_pct DECIMAL(5, 2),
+    max_drawdown_pct DECIMAL(5, 2),
+    profit_target_pct DECIMAL(5, 2),
+    max_leverage DECIMAL(10, 2),
+    is_drawdown_relative BOOLEAN,
+    
+    -- Dynamic features
+    current_balance DECIMAL(18, 2),
+    current_equity DECIMAL(18, 2),
+    days_since_first_trade INTEGER,
+    active_trading_days_count INTEGER,
+    distance_to_profit_target DECIMAL(18, 2),
+    distance_to_max_drawdown DECIMAL(18, 2),
+    open_pnl DECIMAL(18, 2),
+    open_positions_volume DECIMAL(18, 2),
+    
+    -- Rolling performance features
+    rolling_pnl_sum_1d DECIMAL(18, 2),
+    rolling_pnl_avg_1d DECIMAL(18, 2),
+    rolling_pnl_std_1d DECIMAL(18, 2),
+    rolling_pnl_sum_3d DECIMAL(18, 2),
+    rolling_pnl_avg_3d DECIMAL(18, 2),
+    rolling_pnl_std_3d DECIMAL(18, 2),
+    rolling_pnl_min_3d DECIMAL(18, 2),
+    rolling_pnl_max_3d DECIMAL(18, 2),
+    win_rate_3d DECIMAL(5, 2),
+    rolling_pnl_sum_5d DECIMAL(18, 2),
+    rolling_pnl_avg_5d DECIMAL(18, 2),
+    rolling_pnl_std_5d DECIMAL(18, 2),
+    rolling_pnl_min_5d DECIMAL(18, 2),
+    rolling_pnl_max_5d DECIMAL(18, 2),
+    win_rate_5d DECIMAL(5, 2),
+    profit_factor_5d DECIMAL(10, 4),
+    sharpe_ratio_5d DECIMAL(10, 4),
+    rolling_pnl_sum_10d DECIMAL(18, 2),
+    rolling_pnl_avg_10d DECIMAL(18, 2),
+    rolling_pnl_std_10d DECIMAL(18, 2),
+    rolling_pnl_min_10d DECIMAL(18, 2),
+    rolling_pnl_max_10d DECIMAL(18, 2),
+    win_rate_10d DECIMAL(5, 2),
+    profit_factor_10d DECIMAL(10, 4),
+    sharpe_ratio_10d DECIMAL(10, 4),
+    rolling_pnl_sum_20d DECIMAL(18, 2),
+    rolling_pnl_avg_20d DECIMAL(18, 2),
+    rolling_pnl_std_20d DECIMAL(18, 2),
+    win_rate_20d DECIMAL(5, 2),
+    profit_factor_20d DECIMAL(10, 4),
+    sharpe_ratio_20d DECIMAL(10, 4),
+    
+    -- Behavioral features
+    trades_count_5d INTEGER,
+    avg_trade_duration_5d DECIMAL(10, 2),
+    avg_lots_per_trade_5d DECIMAL(10, 4),
+    avg_volume_per_trade_5d DECIMAL(18, 2),
+    stop_loss_usage_rate_5d DECIMAL(5, 2),
+    take_profit_usage_rate_5d DECIMAL(5, 2),
+    buy_sell_ratio_5d DECIMAL(10, 4),
+    top_symbol_concentration_5d DECIMAL(5, 2),
+    
+    -- Market features
+    market_sentiment_score DECIMAL(10, 4),
+    market_volatility_regime VARCHAR(50),
+    market_liquidity_state VARCHAR(50),
+    vix_level DECIMAL(10, 2),
+    dxy_level DECIMAL(10, 2),
+    sp500_daily_return DECIMAL(10, 4),
+    btc_volatility_90d DECIMAL(10, 4),
+    fed_funds_rate DECIMAL(5, 2),
+    
+    -- Time features
+    day_of_week INTEGER,
+    week_of_month INTEGER,
+    month INTEGER,
+    quarter INTEGER,
+    day_of_year INTEGER,
+    is_month_start BOOLEAN,
+    is_month_end BOOLEAN,
+    is_quarter_start BOOLEAN,
+    is_quarter_end BOOLEAN,
+    
+    -- Target variable
+    target_net_profit DECIMAL(18, 2),
+    
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(model_version, training_date)
+    UNIQUE(account_id, prediction_date)
 );
 
 -- Model predictions tracking
@@ -587,7 +1216,7 @@ SELECT
     p.min_trading_days,
     p.max_trading_days,
     -- Lifetime metrics
-    COALESCE(m.total_trades, 0) as lifetime_trades,
+    COALESCE(m.num_trades, 0) as lifetime_trades,
     COALESCE(m.net_profit, 0) as lifetime_profit,
     COALESCE(m.gross_profit, 0) as lifetime_gross_profit,
     COALESCE(m.gross_loss, 0) as lifetime_gross_loss,
@@ -620,7 +1249,7 @@ SELECT
     CURRENT_TIMESTAMP as mv_refreshed_at
 FROM (
     SELECT DISTINCT ON (account_id) *
-    FROM raw_accounts_data
+    FROM raw_metrics_alltime
     ORDER BY account_id, ingestion_timestamp DESC
 ) a
 LEFT JOIN raw_plans_data p ON a.plan_id = p.plan_id
@@ -632,12 +1261,12 @@ LEFT JOIN (
 LEFT JOIN LATERAL (
     SELECT 
         account_id,
-        SUM(total_trades) as trades_last_30d,
+        SUM(num_trades) as trades_last_30d,
         SUM(net_profit) as profit_last_30d,
         COUNT(DISTINCT date) as trading_days_last_30d,
         CASE 
-            WHEN SUM(total_trades) > 0 
-            THEN SUM(winning_trades)::DECIMAL / SUM(total_trades) * 100
+            WHEN SUM(num_trades) > 0 
+            THEN SUM(winning_trades)::DECIMAL / SUM(num_trades) * 100
             ELSE 0 
         END as win_rate_last_30d
     FROM raw_metrics_daily
@@ -648,11 +1277,11 @@ LEFT JOIN LATERAL (
 LEFT JOIN LATERAL (
     SELECT 
         account_id,
-        SUM(total_trades) as trades_last_7d,
+        SUM(num_trades) as trades_last_7d,
         SUM(net_profit) as profit_last_7d,
         CASE 
-            WHEN SUM(total_trades) > 0 
-            THEN SUM(winning_trades)::DECIMAL / SUM(total_trades) * 100
+            WHEN SUM(num_trades) > 0 
+            THEN SUM(winning_trades)::DECIMAL / SUM(num_trades) * 100
             ELSE 0 
         END as win_rate_last_7d
     FROM raw_metrics_daily
@@ -676,7 +1305,7 @@ SELECT
     COUNT(DISTINCT account_id) as active_accounts,
     COUNT(DISTINCT CASE WHEN net_profit > 0 THEN account_id END) as profitable_accounts,
     COUNT(DISTINCT CASE WHEN net_profit < 0 THEN account_id END) as losing_accounts,
-    SUM(total_trades) as total_trades,
+    SUM(num_trades) as num_trades,
     SUM(winning_trades) as total_winning_trades,
     SUM(losing_trades) as total_losing_trades,
     SUM(net_profit) as total_profit,
@@ -714,7 +1343,7 @@ WITH symbol_stats AS (
     SELECT 
         std_symbol,
         COUNT(DISTINCT account_id) as traders_count,
-        COUNT(*) as total_trades,
+        COUNT(*) as num_trades,
         SUM(profit) as total_profit,
         AVG(profit) as avg_profit,
         STDDEV(profit) as profit_stddev,
@@ -737,7 +1366,7 @@ WITH symbol_stats AS (
 SELECT 
     std_symbol,
     traders_count,
-    total_trades,
+    num_trades,
     total_profit,
     avg_profit,
     profit_stddev,
@@ -746,8 +1375,8 @@ SELECT
     gross_profit,
     gross_loss,
     CASE 
-        WHEN total_trades > 0 
-        THEN winning_trades::DECIMAL / total_trades * 100 
+        WHEN num_trades > 0 
+        THEN winning_trades::DECIMAL / num_trades * 100 
         ELSE 0 
     END as win_rate,
     CASE 
@@ -773,7 +1402,7 @@ WITH DATA;
 -- Create indexes for mv_symbol_performance
 CREATE UNIQUE INDEX idx_mv_symbol_performance_symbol ON mv_symbol_performance(std_symbol);
 CREATE INDEX idx_mv_symbol_performance_profit ON mv_symbol_performance(total_profit DESC);
-CREATE INDEX idx_mv_symbol_performance_trades ON mv_symbol_performance(total_trades DESC);
+CREATE INDEX idx_mv_symbol_performance_trades ON mv_symbol_performance(num_trades DESC);
 CREATE INDEX idx_mv_symbol_performance_win_rate ON mv_symbol_performance(win_rate DESC);
 
 -- Account Trading Patterns
@@ -797,10 +1426,10 @@ WITH recent_trades AS (
 SELECT 
     account_id,
     login,
-    COUNT(*) as total_trades_30d,
+    COUNT(*) as num_trades_30d,
     -- Symbol concentration
-    COUNT(DISTINCT std_symbol) as unique_symbols,
-    MODE() WITHIN GROUP (ORDER BY std_symbol) as favorite_symbol,
+    COUNT(DISTINCT recent_trades.std_symbol) as unique_symbols,
+    MODE() WITHIN GROUP (ORDER BY recent_trades.std_symbol) as favorite_symbol,
     MAX(symbol_trades.symbol_count)::DECIMAL / COUNT(*) * 100 as top_symbol_concentration_pct,
     -- Time patterns
     MODE() WITHIN GROUP (ORDER BY trade_hour) as favorite_hour,
@@ -841,7 +1470,7 @@ SELECT
     r.summary->>'volatility_regime' as volatility_regime,
     r.summary->>'liquidity_state' as liquidity_state,
     COUNT(DISTINCT m.account_id) as active_accounts,
-    SUM(m.total_trades) as total_trades,
+    SUM(m.num_trades) as num_trades,
     SUM(m.net_profit) as total_profit,
     AVG(m.net_profit) as avg_profit,
     STDDEV(m.net_profit) as profit_stddev,

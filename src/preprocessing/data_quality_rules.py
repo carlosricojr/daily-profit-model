@@ -296,7 +296,7 @@ RAW_METRICS_DAILY_RULES = [
         rule_type=RuleType.CONSISTENCY,
         description="Total trades should equal winning + losing trades",
         table_name="raw_metrics_daily",
-        condition="total_trades = winning_trades + losing_trades OR total_trades IS NULL",
+        condition="num_trades = winning_trades + losing_trades OR num_trades IS NULL",
         threshold=99.0,
         severity="warning",
     ),

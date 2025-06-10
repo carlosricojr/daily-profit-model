@@ -100,7 +100,7 @@ class PlansIngester(BaseIngester):
             "maxTradingDays",
             "maximumTime",
         ],
-        "profit_split_pct": [
+        "profit_share_pct": [
             "profit_split_pct",
             "profit split %",
             "profit_split_%",
@@ -249,7 +249,7 @@ class PlansIngester(BaseIngester):
             "profit_target_pct",
             "max_drawdown_pct",
             "max_daily_drawdown_pct",
-            "profit_split_pct",
+            "profit_share_pct",
         ]
 
         for field in percentage_fields:
@@ -296,7 +296,7 @@ class PlansIngester(BaseIngester):
             "profit_target_pct",
             "max_drawdown_pct",
             "max_daily_drawdown_pct",
-            "profit_split_pct",
+            "profit_share_pct",
         ]:
             if field in record:
                 record[field] = self._convert_percentage(record[field])
@@ -348,13 +348,13 @@ class PlansIngester(BaseIngester):
             "is_drawdown_relative": is_drawdown_relative,
             "min_trading_days": self._safe_int(record.get("min_trading_days")),
             "max_trading_days": self._safe_int(record.get("max_trading_days")),
-            "profit_split_pct": self._convert_percentage(record.get("profit_split_pct")),
+            "profit_share_pct": self._convert_percentage(record.get("profit_share_pct")),
             "liquidate_friday": self._convert_boolean(record.get("liquidate_friday")),
             "inactivity_period": self._safe_int(record.get("inactivity_period")),
             "daily_drawdown_by_balance_equity": self._convert_boolean(record.get("daily_drawdown_by_balance_equity")),
             "enable_consistency": self._convert_boolean(record.get("enable_consistency")),
             "ingestion_timestamp": datetime.now(),
-            "source_file": record.get("_source_file", "unknown"),
+            "source_api_endpoint": record.get("_source_file", "unknown"),
         }
 
     def _get_conflict_clause(self, table_name: str) -> str:

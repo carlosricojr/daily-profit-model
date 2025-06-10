@@ -126,7 +126,7 @@ class AnomalyDetector:
             m.net_profit,
             m.gross_profit,
             m.gross_loss,
-            m.total_trades,
+            m.num_trades,
             m.win_rate,
             m.profit_factor,
             m.lots_traded,
@@ -158,7 +158,7 @@ class AnomalyDetector:
             "current_balance",
             "current_equity",
             "net_profit",
-            "total_trades",
+            "num_trades",
             "win_rate",
             "profit_factor",
             "volume_traded",
@@ -443,7 +443,7 @@ class AnomalyDetector:
             AVG(net_profit) as avg_profit,
             STDDEV(net_profit) as std_profit,
             AVG(win_rate) as avg_win_rate,
-            AVG(total_trades) as avg_trades
+            AVG(num_trades) as avg_trades
         FROM stg_accounts_daily_snapshots s
         LEFT JOIN raw_metrics_daily m ON s.account_id = m.account_id AND s.date = m.date
         WHERE s.account_id = %s

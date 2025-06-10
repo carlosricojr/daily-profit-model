@@ -13,10 +13,8 @@ This module tests:
 import pytest
 import re
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Tuple
 import sqlparse
-from sqlparse.sql import IdentifierList, Identifier, Function
-from sqlparse.tokens import Keyword, DML
 
 # Add parent directory to path
 import sys
@@ -75,32 +73,42 @@ class SchemaValidator:
         parts = self._split_respecting_parens(columns_def)
         
         for part in parts:
-            part = part.strip()
-            if not part:
-                continue
+            # Handle multi-line parts by processing each line
+            lines = part.strip().split('\n')
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith('--'):
+                    continue
+                    
+                # Skip constraints
+                if any(keyword in line.upper() for keyword in ['PRIMARY KEY', 'FOREIGN KEY', 'CONSTRAINT', 'CHECK', 'UNIQUE']):
+                    # Special case: inline PRIMARY KEY is part of column definition
+                    if 'PRIMARY KEY' in line.upper() and not line.upper().startswith('PRIMARY KEY'):
+                        # This is a column with inline PRIMARY KEY, process it
+                        pass
+                    else:
+                        continue
                 
-            # Skip constraints for now
-            if any(keyword in part.upper() for keyword in ['PRIMARY KEY', 'FOREIGN KEY', 'CONSTRAINT', 'CHECK', 'UNIQUE']):
-                continue
-            
-            # Parse column: name type [constraints]
-            tokens = part.split()
-            if len(tokens) >= 2:
-                col_name = tokens[0]
-                col_type = tokens[1]
-                
-                # Handle parameterized types like VARCHAR(100)
-                if '(' in part:
-                    type_match = re.search(r'(\w+)\s*\(([^)]+)\)', part)
-                    if type_match:
-                        col_type = type_match.group(0)
-                
-                columns[col_name] = {
-                    'type': col_type,
-                    'nullable': 'NOT NULL' not in part.upper(),
-                    'default': self._extract_default(part),
-                    'primary_key': 'PRIMARY KEY' in part.upper()
-                }
+                # Parse column: name type [constraints]
+                # Remove trailing comma if present
+                line = line.rstrip(',')
+                tokens = line.split()
+                if len(tokens) >= 2:
+                    col_name = tokens[0]
+                    col_type = tokens[1]
+                    
+                    # Handle parameterized types like VARCHAR(100)
+                    if '(' in line:
+                        type_match = re.search(r'(\w+)\s*\(([^)]+)\)', line)
+                        if type_match:
+                            col_type = type_match.group(0)
+                    
+                    columns[col_name] = {
+                        'type': col_type,
+                        'nullable': 'NOT NULL' not in line.upper(),
+                        'default': self._extract_default(line),
+                        'primary_key': 'PRIMARY KEY' in line.upper()
+                    }
         
         return columns
     
@@ -423,7 +431,7 @@ class TestSchemaValidation:
                     break
             
             # Check constraint-based primary key
-            if not has_pk and f'PRIMARY KEY' in table_info['definition']:
+            if not has_pk and 'PRIMARY KEY' in table_info['definition']:
                 has_pk = True
             
             if not has_pk:
@@ -436,33 +444,33 @@ class TestSchemaValidation:
     def test_foreign_key_indexes(self, validator):
         """Test that all foreign keys have indexes."""
         issues = validator.validate_foreign_key_indexes()
-        assert not issues, f"Foreign key index issues:\n" + "\n".join(issues)
+        assert not issues, "Foreign key index issues:\n" + "\n".join(issues)
     
     def test_data_type_consistency(self, validator):
         """Test that related columns have consistent data types."""
         issues = validator.validate_data_types()
-        assert not issues, f"Data type consistency issues:\n" + "\n".join(issues)
+        assert not issues, "Data type consistency issues:\n" + "\n".join(issues)
     
     def test_naming_conventions(self, validator):
         """Test that database objects follow naming conventions."""
         issues = validator.validate_naming_conventions()
-        assert not issues, f"Naming convention issues:\n" + "\n".join(issues)
+        assert not issues, "Naming convention issues:\n" + "\n".join(issues)
     
     def test_required_columns_present(self, validator):
         """Test that tables have required audit/tracking columns."""
         issues = validator.validate_required_columns()
-        assert not issues, f"Required column issues:\n" + "\n".join(issues)
+        assert not issues, "Required column issues:\n" + "\n".join(issues)
     
     def test_partitioned_tables_configured(self, validator):
         """Test that partitioned tables are properly configured."""
         issues = validator.validate_partitions()
-        assert not issues, f"Partition configuration issues:\n" + "\n".join(issues)
+        assert not issues, "Partition configuration issues:\n" + "\n".join(issues)
     
     def test_check_constraints_valid(self, validator):
         """Test that CHECK constraints are properly defined."""
         issues = validator.validate_check_constraints()
         # Allow some flexibility here as not all columns need explicit checks
-        assert len(issues) < 5, f"Too many CHECK constraint issues:\n" + "\n".join(issues)
+        assert len(issues) < 5, "Too many CHECK constraint issues:\n" + "\n".join(issues)
     
     def test_no_reserved_keywords_as_identifiers(self, schema_content):
         """Test that reserved keywords aren't used as identifiers."""
@@ -510,7 +518,7 @@ class TestSchemaValidation:
                         if precision > 38:  # PostgreSQL max
                             issues.append(f"{table_name}.{col_name}: Precision {precision} exceeds PostgreSQL maximum of 38")
         
-        assert not issues, f"Decimal precision issues:\n" + "\n".join(issues)
+        assert not issues, "Decimal precision issues:\n" + "\n".join(issues)
     
     def test_timestamp_columns_have_defaults(self, validator):
         """Test that timestamp columns have appropriate defaults."""
@@ -533,7 +541,7 @@ class TestSchemaValidation:
                         if col_name in ['ingestion_timestamp', 'created_at'] and table_name in ['model_predictions', 'model_registry', 'pipeline_execution_log']:
                             issues.append(f"{table_name}.{col_name} should have DEFAULT CURRENT_TIMESTAMP")
         
-        assert not issues, f"Timestamp default issues:\n" + "\n".join(issues)
+        assert not issues, "Timestamp default issues:\n" + "\n".join(issues)
     
     def test_materialized_views_have_indexes(self, schema_content):
         """Test that materialized views have appropriate indexes."""
@@ -548,7 +556,7 @@ class TestSchemaValidation:
             if not re.search(index_pattern, schema_content, re.IGNORECASE):
                 issues.append(f"Materialized view '{mv}' has no indexes")
         
-        assert not issues, f"Materialized view index issues:\n" + "\n".join(issues)
+        assert not issues, "Materialized view index issues:\n" + "\n".join(issues)
     
     def test_functions_have_proper_syntax(self, schema_content):
         """Test that functions are properly defined."""
@@ -580,7 +588,7 @@ class TestSchemaValidation:
                     if func_def.count('$$') < 2:
                         issues.append(f"Function '{func}' missing $$ delimiters")
         
-        assert not issues, f"Function definition issues:\n" + "\n".join(issues)
+        assert not issues, "Function definition issues:\n" + "\n".join(issues)
     
     def test_grants_are_appropriate(self, schema_content):
         """Test that appropriate permissions are granted."""
@@ -612,7 +620,7 @@ class TestSchemaValidation:
             else:
                 index_signatures[signature] = index_name
         
-        assert not duplicates, f"Duplicate index issues:\n" + "\n".join(duplicates)
+        assert not duplicates, "Duplicate index issues:\n" + "\n".join(duplicates)
     
     def test_schema_objects_have_comments(self, schema_content):
         """Test that important objects have descriptive comments."""

@@ -9,26 +9,19 @@ import logging
 from datetime import datetime, timedelta, date
 from typing import Dict, List, Any, Optional, Tuple
 import argparse
-import pandas as pd
 import numpy as np
-import json
-import multiprocessing as mp
-import psutil
-from collections import defaultdict
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.database import get_db_manager
 from utils.logging_config import setup_logging
 from utils.query_performance import QueryPerformanceMonitor
 
 # Import base classes from original engineer_features
-from engineer_features import (
+from .engineer_features import (
     LookaheadBiasValidator, 
     FeatureQualityMonitor,
     OptimizedFeatureEngineer,
-    get_optimal_config,
     PRODUCTION_CONFIG
 )
 
@@ -87,7 +80,7 @@ class EnhancedFeatureEngineerV2(OptimizedFeatureEngineer):
             net_profit,
             gross_profit,
             gross_loss,
-            total_trades,
+            num_trades,
             winning_trades,
             losing_trades,
             win_rate,
@@ -188,7 +181,7 @@ class EnhancedFeatureEngineerV2(OptimizedFeatureEngineer):
                 account_id,
                 -- Lifetime performance
                 net_profit as lifetime_net_profit,
-                total_trades as lifetime_total_trades,
+                num_trades as lifetime_num_trades,
                 win_rate as lifetime_win_rate,
                 profit_factor as lifetime_profit_factor,
                 sharpe_ratio as lifetime_sharpe,
@@ -317,14 +310,14 @@ class EnhancedFeatureEngineerV2(OptimizedFeatureEngineer):
         
         if len(window_data) >= 3:  # Need minimum data
             # Trading frequency consistency
-            trades_per_day = [d.get("total_trades", 0) for d in window_data]
+            trades_per_day = [d.get("num_trades", 0) for d in window_data]
             features[f"trading_frequency_cv_{window}d"] = (
                 np.std(trades_per_day) / np.mean(trades_per_day)
                 if np.mean(trades_per_day) > 0 else 0
             )
             
             # Lot size consistency
-            avg_lots = [d.get("total_lots", 0) / max(d.get("total_trades", 1), 1) for d in window_data]
+            avg_lots = [d.get("total_lots", 0) / max(d.get("num_trades", 1), 1) for d in window_data]
             features[f"lot_size_consistency_{window}d"] = (
                 1 - (np.std(avg_lots) / np.mean(avg_lots))
                 if np.mean(avg_lots) > 0 else 0
@@ -407,8 +400,8 @@ class EnhancedFeatureEngineerV2(OptimizedFeatureEngineer):
                 features[f"max_drawdown_{window}d"] = np.max(dd_values) if dd_values else 0
                 
                 # Trading intensity
-                trades = [d.get("total_trades", 0) for d in window_data]
-                features[f"total_trades_{window}d"] = np.sum(trades)
+                trades = [d.get("num_trades", 0) for d in window_data]
+                features[f"num_trades_{window}d"] = np.sum(trades)
                 features[f"trading_days_{window}d"] = len([t for t in trades if t > 0])
                 
                 # Efficiency metrics
@@ -438,7 +431,7 @@ class EnhancedFeatureEngineerV2(OptimizedFeatureEngineer):
                 features[f"sum_risk_adj_profit_{window}d"] = 0.0
                 features[f"avg_drawdown_{window}d"] = 0.0
                 features[f"max_drawdown_{window}d"] = 0.0
-                features[f"total_trades_{window}d"] = 0
+                features[f"num_trades_{window}d"] = 0
                 features[f"trading_days_{window}d"] = 0
                 
                 if window >= 7:

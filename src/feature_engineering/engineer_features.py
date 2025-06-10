@@ -418,22 +418,22 @@ class OptimizedFeatureEngineer:
         """Get list of account-date combinations to process."""
         if force_rebuild:
             query = """
-            SELECT DISTINCT account_id, login, date as feature_date
+            SELECT DISTINCT account_id, login, snapshot_date as feature_date
             FROM stg_accounts_daily_snapshots
-            WHERE date >= %s AND date <= %s
-            ORDER BY date, account_id
+            WHERE snapshot_date >= %s AND snapshot_date <= %s
+            ORDER BY snapshot_date, account_id
             """
             params = (start_date, end_date)
         else:
             # Only get missing features
             query = """
-            SELECT DISTINCT s.account_id, s.login, s.date as feature_date
+            SELECT DISTINCT s.account_id, s.login, s.snapshot_date as feature_date
             FROM stg_accounts_daily_snapshots s
             LEFT JOIN feature_store_account_daily f
-                ON s.account_id = f.account_id AND s.date = f.feature_date
-            WHERE s.date >= %s AND s.date <= %s
+                ON s.account_id = f.account_id AND s.snapshot_date = f.feature_date
+            WHERE s.snapshot_date >= %s AND s.snapshot_date <= %s
                 AND f.account_id IS NULL
-            ORDER BY s.date, s.account_id
+            ORDER BY s.snapshot_date, s.account_id
             """
             params = (start_date, end_date)
 

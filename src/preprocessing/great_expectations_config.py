@@ -290,7 +290,7 @@ class GreatExpectationsValidator:
             ),
             ExpectationConfiguration(
                 expectation_type="expect_column_sum_to_be_between",
-                kwargs={"column": "total_trades", "min_value": 0, "max_value": 1000000},
+                kwargs={"column": "num_trades", "min_value": 0, "max_value": 1000000},
             ),
             # Custom expectation for trade consistency
             ExpectationConfiguration(

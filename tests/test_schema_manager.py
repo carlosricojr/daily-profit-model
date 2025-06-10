@@ -11,11 +11,9 @@ Tests cover:
 """
 
 import pytest
-import tempfile
 import os
 from pathlib import Path
-from datetime import datetime
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 import psycopg2
 
 # Add parent directory to path
@@ -934,7 +932,7 @@ class TestSchemaIntegration:
         
         # Check table is partitioned
         assert f'CREATE TABLE {partition_table}' in content
-        assert f'PARTITION BY RANGE' in content
+        assert 'PARTITION BY RANGE' in content
         
         # Check partition creation logic exists
         assert 'CREATE TABLE IF NOT EXISTS %I PARTITION OF' in content

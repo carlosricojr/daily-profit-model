@@ -117,7 +117,7 @@ class TrainingDataBuilder:
         # This query joins features from day D with target PnL from day D+1
         insert_query = f"""
         INSERT INTO {self.training_table} (
-            login, prediction_date, feature_date,
+            account_id, login, prediction_date, feature_date,
             -- Static features
             starting_balance, max_daily_drawdown_pct, max_drawdown_pct,
             profit_target_pct, max_leverage, is_drawdown_relative,
@@ -153,6 +153,7 @@ class TrainingDataBuilder:
             target_net_profit
         )
         SELECT 
+            f.account_id,
             f.login,
             f.feature_date + INTERVAL '1 day' as prediction_date,  -- D+1
             f.feature_date,  -- D
@@ -194,9 +195,9 @@ class TrainingDataBuilder:
                 -- Only include accounts that are active on D+1
                 SELECT DISTINCT account_id 
                 FROM stg_accounts_daily_snapshots
-                WHERE date = f.feature_date + INTERVAL '1 day'
+                WHERE snapshot_date = f.feature_date + INTERVAL '1 day'
             )
-        ON CONFLICT (login, prediction_date) DO NOTHING
+        ON CONFLICT (account_id, prediction_date) DO NOTHING
         """
 
         # Execute the insert

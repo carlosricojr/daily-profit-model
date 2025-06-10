@@ -9,16 +9,13 @@ This module provides production-ready schema management with:
 - Comprehensive logging and error handling
 """
 
-import os
 import re
-import json
 import hashlib
 import logging
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional, Any, Set
 from pathlib import Path
 import psycopg2
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 from .database import DatabaseManager
 
@@ -806,7 +803,7 @@ class SchemaManager:
         comparison = self.compare_schemas(desired_objects, current_objects)
         
         # Summary
-        logger.info(f"Schema comparison results:")
+        logger.info("Schema comparison results:")
         logger.info(f"  - Objects to create: {len(comparison['to_create'])}")
         logger.info(f"  - Objects to modify: {len(comparison['to_modify'])}")
         logger.info(f"  - Objects to drop: {len(comparison['to_drop'])}")
@@ -841,7 +838,7 @@ class SchemaManager:
             migration_script, 
             rollback_script,
             dry_run=dry_run,
-            description=f"Auto-migration from schema compliance check"
+            description="Auto-migration from schema compliance check"
         )
         
         result['migration_needed'] = True
@@ -864,7 +861,7 @@ def pg_get_tabledef(table_name: str) -> str:
     PostgreSQL function to get complete table definition.
     This should be created in the database for full functionality.
     """
-    return f"""
+    return """
 CREATE OR REPLACE FUNCTION pg_get_tabledef(table_name text)
 RETURNS text AS $$
 DECLARE

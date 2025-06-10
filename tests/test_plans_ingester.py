@@ -74,7 +74,7 @@ class TestPlansIngester(unittest.TestCase):
             "is_drawdown_relative": True,
             "min_trading_days": 5,
             "max_trading_days": 30,
-            "profit_split_pct": 80.0,
+            "profit_share_pct": 80.0,
         }
 
         is_valid, errors = self.ingester._validate_record(valid_plan)
@@ -120,7 +120,7 @@ class TestPlansIngester(unittest.TestCase):
                 "Max Leverage": 100,
                 "Is Drawdown Relative": "true",
                 "Min Trading Days": 5,
-                "Profit Split %": 80.0,
+                "Profit Share %": 80.0,
             }
         ]
 
@@ -191,7 +191,7 @@ class TestPlansIngester(unittest.TestCase):
                 "profit_target_pct": "10%",  # String with %
                 "max_drawdown_pct": 10.0,  # Already numeric
                 "max_daily_drawdown_pct": "5",  # String without %
-                "profit_split_pct": "80.5%",  # Decimal percentage
+                "profit_share_pct": "80.5%",  # Decimal percentage
             }
         ]
 
@@ -202,7 +202,7 @@ class TestPlansIngester(unittest.TestCase):
         self.assertEqual(transformed["profit_target_pct"], 10.0)
         self.assertEqual(transformed["max_drawdown_pct"], 10.0)
         self.assertEqual(transformed["max_daily_drawdown_pct"], 5.0)
-        self.assertEqual(transformed["profit_split_pct"], 80.5)
+        self.assertEqual(transformed["profit_share_pct"], 80.5)
 
     def test_multiple_csv_files(self):
         """Test processing multiple CSV files."""

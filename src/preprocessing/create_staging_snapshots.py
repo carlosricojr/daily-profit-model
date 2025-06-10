@@ -120,7 +120,7 @@ class StagingSnapshotCreator:
         query = f"""
         SELECT COUNT(*) as count 
         FROM {self.staging_table}
-        WHERE date = %s
+        WHERE snapshot_date = %s
         """
         result = self.db_manager.model_db.execute_query(query, (check_date,))
         return result[0]["count"] > 0
@@ -135,18 +135,20 @@ class StagingSnapshotCreator:
         - Plan information from raw_plans_data
         """
         # Delete existing snapshots for this date if any
-        delete_query = f"DELETE FROM {self.staging_table} WHERE date = %s"
+        delete_query = f"DELETE FROM {self.staging_table} WHERE snapshot_date = %s"
         self.db_manager.model_db.execute_command(delete_query, (snapshot_date,))
 
         # Query to create snapshots
         # This query gets the latest account state and joins with metrics and plans
         insert_query = f"""
         INSERT INTO {self.staging_table} (
-            account_id, login, date, trader_id, plan_id, phase, status,
-            starting_balance, current_balance, current_equity,
-            profit_target_pct, max_daily_drawdown_pct, max_drawdown_pct,
+            account_id, login, snapshot_date, trader_id, plan_id, phase, status,
+            starting_balance, balance, equity,
+            profit_target, profit_target_pct, 
+            max_daily_drawdown, max_daily_drawdown_pct,
+            max_drawdown, max_drawdown_pct,
             max_leverage, is_drawdown_relative,
-            days_since_first_trade, active_trading_days_count,
+            days_active, days_since_last_trade,
             distance_to_profit_target, distance_to_max_drawdown,
             liquidate_friday, inactivity_period, 
             daily_drawdown_by_balance_equity, enable_consistency
@@ -176,10 +178,11 @@ class StagingSnapshotCreator:
             SELECT 
                 account_id,
                 MIN(date) as first_trade_date,
+                MAX(date) as last_trade_date,
                 COUNT(DISTINCT date) as active_days,
                 COUNT(DISTINCT CASE WHEN date <= %s THEN date END) as active_days_to_date
             FROM raw_metrics_daily
-            WHERE total_trades > 0
+            WHERE num_trades > 0
             GROUP BY account_id
         ),
         plan_info AS (
@@ -188,6 +191,7 @@ class StagingSnapshotCreator:
                 plan_id,
                 profit_target,
                 max_drawdown,
+                max_daily_drawdown,
                 liquidate_friday,
                 inactivity_period,
                 daily_drawdown_by_balance_equity,
@@ -198,24 +202,27 @@ class StagingSnapshotCreator:
         SELECT 
             la.account_id,
             la.login,
-            %s::date as date,
+            %s::date as snapshot_date,
             la.trader_id,
             la.plan_id,
             la.phase,
             la.status,
             la.starting_balance,
-            COALESCE(am.day_end_balance, la.current_balance) as current_balance,
-            COALESCE(am.day_end_equity, la.current_equity) as current_equity,
+            COALESCE(am.day_end_balance, la.current_balance) as balance,
+            COALESCE(am.day_end_equity, la.current_equity) as equity,
+            pi.profit_target,
             la.profit_target_pct,
+            pi.max_daily_drawdown,
             la.max_daily_drawdown_pct,
+            pi.max_drawdown,
             la.max_drawdown_pct,
             la.max_leverage,
             la.is_drawdown_relative,
+            COALESCE(ah.active_days_to_date, 0) as days_active,
             CASE 
-                WHEN ah.first_trade_date IS NULL THEN 0
-                ELSE %s::date - ah.first_trade_date
-            END as days_since_first_trade,
-            COALESCE(ah.active_days_to_date, 0) as active_trading_days_count,
+                WHEN ah.last_trade_date IS NULL THEN NULL
+                ELSE %s::date - ah.last_trade_date
+            END as days_since_last_trade,
             -- Distance to profit target
             CASE 
                 WHEN pi.profit_target IS NOT NULL THEN 

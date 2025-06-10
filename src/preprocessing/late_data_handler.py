@@ -175,7 +175,7 @@ class LateDataHandler:
             date,
             ingestion_timestamp,
             net_profit,
-            total_trades
+            num_trades
         FROM raw_metrics_daily
         WHERE date = %s
         AND ingestion_timestamp > %s
@@ -214,7 +214,7 @@ class LateDataHandler:
                     record_count=len(metrics),
                     details={
                         "net_profit": metrics[-1]["net_profit"],
-                        "total_trades": metrics[-1]["total_trades"],
+                        "num_trades": metrics[-1]["num_trades"],
                     },
                 )
             )

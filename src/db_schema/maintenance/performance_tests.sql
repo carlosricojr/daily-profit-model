@@ -76,7 +76,7 @@ WITH monthly_performance AS (
 SELECT 
     account_id,
     COUNT(DISTINCT month) as active_months,
-    SUM(trades) as total_trades,
+    SUM(trades) as num_trades,
     SUM(profit) as total_profit,
     AVG(profit) as avg_monthly_profit
 FROM monthly_performance
@@ -137,7 +137,7 @@ JOIN prop_trading_model.raw_plans_data p ON a.plan_id = p.plan_id
 JOIN LATERAL (
     SELECT 
         COUNT(DISTINCT std_symbol) as unique_symbols,
-        COUNT(*) as total_trades,
+        COUNT(*) as num_trades,
         SUM(profit) as total_profit
     FROM prop_trading_model.raw_trades_closed
     WHERE account_id = a.account_id
