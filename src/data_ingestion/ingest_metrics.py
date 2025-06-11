@@ -13,13 +13,13 @@ from enum import Enum
 try:
     from .base_ingester import BaseIngester, IngestionMetrics, CheckpointManager
     from ..utils.api_client import RiskAnalyticsAPIClient
-    from ..utils.logging_config import get_logger
+    from ..utils.logging_config import get_logger, set_request_context
 except ImportError:
     # Fallback for direct execution
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from data_ingestion.base_ingester import BaseIngester, IngestionMetrics, CheckpointManager
     from utils.api_client import RiskAnalyticsAPIClient
-    from utils.logging_config import get_logger
+    from utils.logging_config import get_logger, set_request_context
 
 logger = get_logger(__name__)
 
@@ -67,9 +67,9 @@ class MetricsIngester(BaseIngester):
 
         # Table mapping for different metric types
         self.table_mapping = {
-            MetricType.ALLTIME: "raw_metrics_alltime",
-            MetricType.DAILY: "raw_metrics_daily",
-            MetricType.HOURLY: "raw_metrics_hourly",
+            MetricType.ALLTIME: "prop_trading_model.raw_metrics_alltime",
+            MetricType.DAILY: "prop_trading_model.raw_metrics_daily",
+            MetricType.HOURLY: "prop_trading_model.raw_metrics_hourly",
         }
 
         # Initialize separate checkpoint managers and metrics for each type
@@ -413,7 +413,7 @@ class MetricsIngester(BaseIngester):
             "source_api_endpoint": "/v2/metrics/alltime"
         }
         
-        # Process all fields using field mappings
+        # Process ONLY fields that are in our field mapping to avoid unmapped fields
         for api_field, db_field in self.alltime_field_mapping.items():
             if api_field in metric:
                 value = metric.get(api_field)
@@ -441,7 +441,15 @@ class MetricsIngester(BaseIngester):
                                 'daily_std_ret', 'daily_downside_std_ret', 'rel_risk_adj_profit',
                                 'net_profit_per_usd_volume', 'gross_profit_per_usd_volume', 
                                 'gross_loss_per_usd_volume', 'distance_gross_profit_loss_per_usd_volume',
-                                'multiple_gross_profit_loss_per_usd_volume', 'multiple_gross_profit_loss_per_lot']:
+                                'multiple_gross_profit_loss_per_usd_volume', 'multiple_gross_profit_loss_per_lot',
+                                # Add DECIMAL(10,6) fields that need bounds checking
+                                'lifetime_in_days', 'one_std_outlier_profit_contrib', 'two_std_outlier_profit_contrib',
+                                'multiple_win_loss_lots', 'multiple_win_loss_volume', 'cv_durations', 'cv_tp', 'cv_sl',
+                                'mean_tp_vs_sl', 'median_tp_vs_sl', 'min_tp_vs_sl', 'max_tp_vs_sl', 'cv_tp_vs_sl',
+                                'mean_val_to_eqty_open_pos', 'median_val_to_eqty_open_pos', 'max_val_to_eqty_open_pos',
+                                'cv_trades_per_day',
+                                # Add DECIMAL(5,2) fields that need bounds checking  
+                                'success_rate', 'top_10_prcnt_profit_contrib', 'bottom_10_prcnt_loss_contrib']:
                     # Use bounds checking for fields prone to extreme values
                     record[db_field] = self._safe_bound_extreme(value, db_field)
                 elif db_field in ['mean_num_trades_in_dd', 'median_num_trades_in_dd',  # FIXED: These are decimals
@@ -472,7 +480,7 @@ class MetricsIngester(BaseIngester):
             "source_api_endpoint": "/v2/metrics/daily"
         }
         
-        # Process all fields using field mappings
+        # Process ONLY fields that are in our field mapping to avoid unmapped fields
         for api_field, db_field in self.daily_field_mapping.items():
             if api_field in metric and db_field not in record:
                 value = metric.get(api_field)
@@ -501,7 +509,15 @@ class MetricsIngester(BaseIngester):
                                 'daily_std_ret', 'daily_downside_std_ret', 'rel_risk_adj_profit',
                                 'net_profit_per_usd_volume', 'gross_profit_per_usd_volume', 
                                 'gross_loss_per_usd_volume', 'distance_gross_profit_loss_per_usd_volume',
-                                'multiple_gross_profit_loss_per_usd_volume', 'multiple_gross_profit_loss_per_lot']:
+                                'multiple_gross_profit_loss_per_usd_volume', 'multiple_gross_profit_loss_per_lot',
+                                # Add DECIMAL(10,6) fields that need bounds checking
+                                'lifetime_in_days', 'one_std_outlier_profit_contrib', 'two_std_outlier_profit_contrib',
+                                'multiple_win_loss_lots', 'multiple_win_loss_volume', 'cv_durations', 'cv_tp', 'cv_sl',
+                                'mean_tp_vs_sl', 'median_tp_vs_sl', 'min_tp_vs_sl', 'max_tp_vs_sl', 'cv_tp_vs_sl',
+                                'mean_val_to_eqty_open_pos', 'median_val_to_eqty_open_pos', 'max_val_to_eqty_open_pos',
+                                'cv_trades_per_day',
+                                # Add DECIMAL(5,2) fields that need bounds checking  
+                                'success_rate', 'top_10_prcnt_profit_contrib', 'bottom_10_prcnt_loss_contrib']:
                     # Use bounds checking for fields prone to extreme values
                     record[db_field] = self._safe_bound_extreme(value, db_field)
                 elif db_field in ['mean_num_trades_in_dd', 'median_num_trades_in_dd',  # FIXED: These are decimals
@@ -513,16 +529,6 @@ class MetricsIngester(BaseIngester):
                 else:
                     # Default to float for numeric fields
                     record[db_field] = self._safe_float(value)
-        
-        # Handle fields that may have different names in daily vs alltime
-        if 'priorDaysBalance' in metric:
-            record['balance_start'] = self._safe_float(metric['priorDaysBalance'])
-        if 'currentBalance' in metric:
-            record['balance_end'] = self._safe_float(metric['currentBalance'])
-        if 'priorDaysEquity' in metric:
-            record['equity_start'] = self._safe_float(metric['priorDaysEquity'])
-        if 'currentEquity' in metric:
-            record['equity_end'] = self._safe_float(metric['currentEquity'])
         
         return record
 
@@ -552,7 +558,7 @@ class MetricsIngester(BaseIngester):
             "source_api_endpoint": "/v2/metrics/hourly"
         }
         
-        # Process all fields using field mappings (same comprehensive approach as daily/alltime)
+        # Process ONLY fields that are in our field mapping to avoid unmapped fields
         for api_field, db_field in self.hourly_field_mapping.items():
             if api_field in metric and db_field not in record:
                 value = metric.get(api_field)
@@ -581,7 +587,15 @@ class MetricsIngester(BaseIngester):
                                 'daily_std_ret', 'daily_downside_std_ret', 'rel_risk_adj_profit',
                                 'net_profit_per_usd_volume', 'gross_profit_per_usd_volume', 
                                 'gross_loss_per_usd_volume', 'distance_gross_profit_loss_per_usd_volume',
-                                'multiple_gross_profit_loss_per_usd_volume', 'multiple_gross_profit_loss_per_lot']:
+                                'multiple_gross_profit_loss_per_usd_volume', 'multiple_gross_profit_loss_per_lot',
+                                # Add DECIMAL(10,6) fields that need bounds checking
+                                'lifetime_in_days', 'one_std_outlier_profit_contrib', 'two_std_outlier_profit_contrib',
+                                'multiple_win_loss_lots', 'multiple_win_loss_volume', 'cv_durations', 'cv_tp', 'cv_sl',
+                                'mean_tp_vs_sl', 'median_tp_vs_sl', 'min_tp_vs_sl', 'max_tp_vs_sl', 'cv_tp_vs_sl',
+                                'mean_val_to_eqty_open_pos', 'median_val_to_eqty_open_pos', 'max_val_to_eqty_open_pos',
+                                'cv_trades_per_day',
+                                # Add DECIMAL(5,2) fields that need bounds checking  
+                                'success_rate', 'top_10_prcnt_profit_contrib', 'bottom_10_prcnt_loss_contrib']:
                     # Use bounds checking for fields prone to extreme values
                     record[db_field] = self._safe_bound_extreme(value, db_field)
                 elif db_field in ['mean_num_trades_in_dd', 'median_num_trades_in_dd',  # FIXED: These can be decimals
@@ -593,26 +607,6 @@ class MetricsIngester(BaseIngester):
                 else:
                     # Default to float for numeric fields, with proper null handling
                     record[db_field] = self._safe_float(value)
-        
-        # Handle fields that may have different names in hourly vs daily/alltime
-        if 'priorDaysBalance' in metric:
-            record['balance_start'] = self._safe_float(metric['priorDaysBalance'])
-        if 'currentBalance' in metric:
-            record['balance_end'] = self._safe_float(metric['currentBalance'])
-        if 'priorDaysEquity' in metric:
-            record['equity_start'] = self._safe_float(metric['priorDaysEquity'])
-        if 'currentEquity' in metric:
-            record['equity_end'] = self._safe_float(metric['currentEquity'])
-        
-        # Handle specific hourly mappings (if needed for backward compatibility)
-        if 'numTrades' in metric and 'num_trades' not in record:
-            record['num_trades'] = self._safe_int(metric['numTrades'])
-        if 'successRate' in metric and 'win_rate' not in record:
-            record['win_rate'] = self._safe_float(metric['successRate'])
-        if 'totalLots' in metric and 'lots_traded' not in record:
-            record['lots_traded'] = self._safe_float(metric['totalLots'])
-        if 'totalVolume' in metric and 'volume_traded' not in record:
-            record['volume_traded'] = self._safe_float(metric['totalVolume'])
         
         return record
     
@@ -684,27 +678,46 @@ class MetricsIngester(BaseIngester):
         if val is None:
             return None
         
+        # Fields with DECIMAL(10,6) precision can only hold values < 10^4 = 10,000
+        decimal_10_6_fields = [
+            'lifetime_in_days', 'one_std_outlier_profit_contrib', 'two_std_outlier_profit_contrib',
+            'multiple_win_loss_lots', 'multiple_win_loss_volume', 'cv_durations', 'cv_tp', 'cv_sl',
+            'mean_tp_vs_sl', 'median_tp_vs_sl', 'min_tp_vs_sl', 'max_tp_vs_sl', 'cv_tp_vs_sl',
+            'mean_val_to_eqty_open_pos', 'median_val_to_eqty_open_pos', 'max_val_to_eqty_open_pos',
+            'cv_trades_per_day'
+        ]
+        
+        # Fields with DECIMAL(5,2) precision can only hold values < 10^3 = 1,000  
+        decimal_5_2_fields = [
+            'success_rate', 'top_10_prcnt_profit_contrib', 'bottom_10_prcnt_loss_contrib'
+        ]
+        
+        if field_name in decimal_10_6_fields:
+            # DECIMAL(10,6) fields can only hold values with absolute value < 10^4
+            if abs(val) >= 9999.999999:  # Leave small margin for safety
+                return 9999.999999 if val > 0 else -9999.999999
+        elif field_name in decimal_5_2_fields:
+            # DECIMAL(5,2) fields can only hold values with absolute value < 10^3
+            if abs(val) >= 999.99:  # Leave small margin for safety
+                return 999.99 if val > 0 else -999.99
+        
         # Define reasonable bounds for different metric types
         if 'ratio' in field_name or 'sharpe' in field_name or 'sortino' in field_name:
             # Ratios and Sharpe/Sortino can be extreme but cap at ±1000
             if abs(val) > 1000:
-                logger.debug(f"Capping extreme {field_name} value: {val} -> {1000 if val > 0 else -1000}")
                 return 1000.0 if val > 0 else -1000.0
         elif 'per_usd_volume' in field_name or 'per_lot' in field_name:
             # Per-unit metrics can be very large in edge cases
             if abs(val) > 1000000:
-                logger.debug(f"Capping extreme {field_name} value: {val} -> {1000000 if val > 0 else -1000000}")
                 return 1000000.0 if val > 0 else -1000000.0
         elif 'multiple' in field_name:
-            # Multiples should be reasonable
+            # Multiples should be reasonable - but this was already handled above for DECIMAL(10,6)
             if abs(val) > 10000:
-                logger.debug(f"Capping extreme {field_name} value: {val} -> {10000 if val > 0 else -10000}")
                 return 10000.0 if val > 0 else -10000.0
         
         # For DOUBLE PRECISION fields, PostgreSQL can handle ±1.7976931348623157E+308
         # but we'll use a reasonable cap to avoid issues
         if abs(val) > 1e15:  # 1 quadrillion
-            logger.warning(f"Extremely large value for {field_name}: {val}, capping at ±1e15")
             return 1e15 if val > 0 else -1e15
         
         return val
@@ -754,15 +767,205 @@ class MetricsIngester(BaseIngester):
         else:  # daily
             return "ON CONFLICT (account_id, date) DO UPDATE SET"
 
+    def ingest_metrics_for_training(
+        self,
+        start_date: date,
+        end_date: Optional[date] = None,
+        logins: Optional[List[str]] = None,
+        force_full_refresh: bool = False,
+        resume_from_checkpoint: bool = True,
+        include_hourly: bool = True,
+    ) -> Dict[str, int]:
+        """
+        Ingest metrics optimized for training scenarios with date-based strategy.
+        
+        This method implements an optimized two-step approach:
+        1. First ingests daily metrics for the specified date range (date-filterable)
+        2. Extracts unique account IDs from the ingested daily data
+        3. Then ingests alltime metrics for only those specific accounts (much more targeted)
+        
+        This approach is significantly more efficient than ingesting all alltime metrics
+        when we only need accounts that were active in a specific time period.
+        
+        Args:
+            start_date: Start date for the training period (required)
+            end_date: End date for the training period (defaults to yesterday)
+            logins: Optional list of specific login IDs to filter
+            force_full_refresh: Whether to truncate and reload all data
+            resume_from_checkpoint: Whether to resume from saved checkpoints
+            
+        Returns:
+            Dictionary with counts for each metric type ingested
+        """
+        if not end_date:
+            end_date = datetime.now().date() - timedelta(days=1)
+            
+        logger.info(f"Starting training-optimized metrics ingestion for period {start_date} to {end_date}")
+        
+        results = {}
+        
+        try:
+            # Step 1: Ingest daily metrics for the target date range
+            logger.info("Step 1: Ingesting daily metrics for target date range...")
+            daily_records = self.ingest_metrics(
+                metric_type="daily",
+                start_date=start_date,
+                end_date=end_date, 
+                logins=logins,
+                force_full_refresh=force_full_refresh,
+                resume_from_checkpoint=resume_from_checkpoint,
+            )
+            results["daily"] = daily_records
+            logger.info(f"Daily metrics ingestion complete: {daily_records} records")
+            
+            # Step 2: Extract unique account IDs from the ingested daily data
+            logger.info("Step 2: Extracting unique account IDs from ingested daily metrics...")
+            account_ids = self._extract_account_ids_from_daily_metrics(start_date, end_date)
+            logger.info(f"Found {len(account_ids)} unique accounts active during {start_date} to {end_date}")
+            
+            if not account_ids:
+                logger.warning("No account IDs found in daily metrics. Skipping alltime metrics ingestion.")
+                results["alltime"] = 0
+                return results
+            
+            # Step 3: Ingest alltime metrics for discovered accounts in batches
+            logger.info("Step 3: Ingesting alltime metrics for discovered accounts in batches...")
+            alltime_records = 0
+            batch_size = 50  # Process 50 accounts at a time for alltime metrics
+            
+            for i in range(0, len(account_ids), batch_size):
+                batch = account_ids[i:i + batch_size]
+                batch_end = min(i + batch_size, len(account_ids))
+                logger.info(f"Processing alltime metrics batch {i//batch_size + 1}/{(len(account_ids) + batch_size - 1)//batch_size} "
+                           f"(accounts {i+1}-{batch_end} of {len(account_ids)})")
+                
+                try:
+                    batch_records = self.ingest_metrics(
+                        metric_type="alltime",
+                        account_ids=batch,
+                        force_full_refresh=False,  # Don't truncate alltime table, just upsert these accounts
+                        resume_from_checkpoint=False,  # Don't use checkpoints for batches
+                        api_limit=50  # Use small limit since each account has only 1 alltime record
+                    )
+                    alltime_records += batch_records
+                    logger.info(f"Batch complete: {batch_records} records ingested")
+                    
+                    # Add delay between batches to avoid overwhelming API server
+                    if i + batch_size < len(account_ids):  # Don't sleep after last batch
+                        import time
+                        time.sleep(.050)  # 50ms delay between batches
+                        
+                except Exception as e:
+                    logger.error(f"Failed to process alltime metrics batch {i//batch_size + 1}: {str(e)}", exc_info=True)
+                    # Continue with next batch rather than failing completely
+                    continue
+            
+            results["alltime"] = alltime_records
+            logger.info(f"Alltime metrics ingestion complete: {alltime_records} total records")
+            
+            # Step 4: Optionally ingest hourly metrics for discovered accounts
+            if include_hourly:
+                logger.info("Step 4: Ingesting hourly metrics for discovered accounts in batches...")
+                hourly_records = 0
+                hourly_batch_size = 10  # Process 10 accounts at a time for hourly metrics
+                
+                for i in range(0, len(account_ids), hourly_batch_size):
+                    batch = account_ids[i:i + hourly_batch_size]
+                    batch_end = min(i + hourly_batch_size, len(account_ids))
+                    logger.info(f"Processing hourly metrics batch {i//hourly_batch_size + 1}/{(len(account_ids) + hourly_batch_size - 1)//hourly_batch_size} "
+                               f"(accounts {i+1}-{batch_end} of {len(account_ids)})")
+                    
+                    try:
+                        batch_records = self.ingest_metrics(
+                            metric_type="hourly",
+                            start_date=start_date,
+                            end_date=end_date,
+                            account_ids=batch,
+                            force_full_refresh=False,
+                            resume_from_checkpoint=False,
+                            api_limit=1000  # Use full limit for hourly since we're batching by accounts
+                        )
+                        hourly_records += batch_records
+                        logger.info(f"Batch complete: {batch_records} records ingested")
+                        
+                        # Add delay between batches to avoid overwhelming API server
+                        if i + hourly_batch_size < len(account_ids):  # Don't sleep after last batch
+                            import time
+                            time.sleep(2)  # 2 second delay between hourly batches (more data per batch)
+                            
+                    except Exception as e:
+                        logger.error(f"Failed to process hourly metrics batch {i//hourly_batch_size + 1}: {str(e)}", exc_info=True)
+                        # Continue with next batch rather than failing completely
+                        continue
+                
+                results["hourly"] = hourly_records
+                logger.info(f"Hourly metrics ingestion complete: {hourly_records} total records")
+            
+            # Log summary
+            total_records = sum(results.values())
+            logger.info(f"Training data ingestion complete: {total_records} total records")
+            logger.info(f"  - Daily metrics: {results['daily']} records")
+            logger.info(f"  - Alltime metrics: {results['alltime']} records")
+            if include_hourly:
+                logger.info(f"  - Hourly metrics: {results.get('hourly', 0)} records")
+            logger.info(f"  - Target accounts: {len(account_ids)} accounts")
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Training metrics ingestion failed: {str(e)}", exc_info=True)
+            raise
+
+    def _extract_account_ids_from_daily_metrics(
+        self, 
+        start_date: date, 
+        end_date: date
+    ) -> List[str]:
+        """
+        Extract unique account IDs from daily metrics for the specified date range.
+        
+        Args:
+            start_date: Start date for account extraction
+            end_date: End date for account extraction
+            
+        Returns:
+            List of unique account IDs that had activity in the date range
+        """
+        try:
+            query = """
+                SELECT DISTINCT account_id 
+                FROM prop_trading_model.raw_metrics_daily 
+                WHERE date >= %s AND date <= %s 
+                AND account_id IS NOT NULL
+                ORDER BY account_id
+            """
+            
+            results = self.db_manager.model_db.execute_query(
+                query, (start_date, end_date)
+            )
+            
+            account_ids = [row["account_id"] for row in results]
+            
+            logger.info(f"Extracted {len(account_ids)} unique account IDs from daily metrics")
+            if account_ids:
+                logger.debug(f"Account ID range: {account_ids[0]} to {account_ids[-1]}")
+            
+            return account_ids
+            
+        except Exception as e:
+            logger.error(f"Failed to extract account IDs from daily metrics: {str(e)}")
+            raise
+
     def ingest_metrics(
         self,
         metric_type: str,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         logins: Optional[List[str]] = None,
-        accountids: Optional[List[str]] = None,
+        account_ids: Optional[List[str]] = None,
         force_full_refresh: bool = False,
         resume_from_checkpoint: bool = True,
+        api_limit: Optional[int] = None,
     ) -> int:
         """Ingest metrics data for the specified type."""
         try:
@@ -774,9 +977,17 @@ class MetricsIngester(BaseIngester):
         # Set table name for this ingestion
         self.table_name = self.table_mapping[metric_enum]
         
+        # Update logging context with the correct table name
+        set_request_context(ingestion_type=self.ingestion_type, table_name=self.table_name)
+        
         # Get the appropriate checkpoint manager and metrics
         checkpoint_manager = self.checkpoint_managers[metric_enum.value]
         metrics = self.metrics_by_type[metric_enum.value]
+        
+        # Reset metrics for a fresh run unless resuming from checkpoint
+        if not resume_from_checkpoint or force_full_refresh:
+            metrics = IngestionMetrics()
+            self.metrics_by_type[metric_enum.value] = metrics
         
         # Override base class attributes for this run
         self.checkpoint_manager = checkpoint_manager
@@ -785,6 +996,8 @@ class MetricsIngester(BaseIngester):
         logger.info(
             f"Starting {metric_type} metrics ingestion to table {self.table_name}"
         )
+        logger.info(f"Parameters: logins={logins}, accountIds={account_ids}")
+        logger.info(f"Force refresh: {force_full_refresh}, Resume from checkpoint: {resume_from_checkpoint}")
 
         # Initialize checkpoint
         checkpoint = None
@@ -801,11 +1014,11 @@ class MetricsIngester(BaseIngester):
         try:
             if metric_enum == MetricType.ALLTIME:
                 total_records = self._ingest_alltime_metrics(
-                    logins, accountids, checkpoint
+                    logins, account_ids, checkpoint, api_limit
                 )
             else:
                 total_records = self._ingest_time_series_metrics(
-                    metric_enum, start_date, end_date, logins, accountids, checkpoint
+                    metric_enum, start_date, end_date, logins, account_ids, checkpoint, api_limit
                 )
 
             # Save final checkpoint
@@ -820,7 +1033,6 @@ class MetricsIngester(BaseIngester):
 
             # Log final metrics
             logger.info(f"Ingestion complete: {total_records} records processed")
-            metrics.log_final_summary()
 
             return total_records
 
@@ -831,33 +1043,47 @@ class MetricsIngester(BaseIngester):
     def _ingest_alltime_metrics(
         self,
         logins: Optional[List[str]] = None,
-        accountids: Optional[List[str]] = None,
+        account_ids: Optional[List[str]] = None,
         checkpoint: Optional[Dict[str, Any]] = None,
+        api_limit: Optional[int] = None,
     ) -> int:
         """Ingest all-time metrics data with enhanced risk factors."""
         try:
             # Resume from checkpoint
-            start_page = 1
+            # Note: page_num from enumerate() is 0-based, so start_page should be 0-based too
+            start_page = 0
             if checkpoint:
-                start_page = checkpoint.get("last_processed_page", 1) + 1
-                if start_page > 1:
-                    logger.info(f"Resuming from page {start_page}")
+                # last_processed_page is 0-based (from enumerate()), so add 1 to get next page
+                start_page = checkpoint.get("last_processed_page", -1) + 1
+                if start_page > 0:
+                    logger.info(f"Resuming from page {start_page} (0-based indexing)")
 
             batch_data = []
             pages_received = 0
+            
+            logger.info(f"Starting API data retrieval for alltime metrics...")
+            logger.info(f"Starting from page: {start_page} (0-based indexing)")
 
+            # Use custom limit if provided, otherwise use 50 for alltime when we have account IDs
+            effective_limit = api_limit if api_limit is not None else (50 if account_ids else 1000)
+            
+            logger.info(f"Fetching alltime metrics with params: logins={logins}, account_ids={account_ids}, limit={effective_limit}")
+            
             for page_num, records in enumerate(
                 self.api_client.get_metrics(
-                    metric_type="alltime", logins=logins, accountids=accountids
+                    metric_type="alltime", 
+                    logins=logins, 
+                    account_ids=account_ids,
+                    limit=effective_limit
                 )
             ):
                 pages_received += 1
-                # Skip pages already processed
+                # Skip pages already processed (both page_num and start_page are 0-based)
                 if page_num < start_page:
                     logger.info(f"Skipping already processed page {page_num}")
                     continue
 
-                logger.info(f"Processing page {page_num} with {len(records)} records")
+                logger.info(f"Processing page {page_num} with {len(records)} records", extra={"has_data": len(records) > 0})
 
                 for record in records:
                     try:
@@ -927,8 +1153,9 @@ class MetricsIngester(BaseIngester):
         start_date: Optional[date],
         end_date: Optional[date],
         logins: Optional[List[str]],
-        accountids: Optional[List[str]],
+        account_ids: Optional[List[str]],
         checkpoint: Optional[Dict[str, Any]],
+        api_limit: Optional[int] = None,
     ) -> int:
         """Ingest daily or hourly metrics data with enhanced risk factors."""
         # Determine date range
@@ -946,7 +1173,6 @@ class MetricsIngester(BaseIngester):
         logger.info(f"Processing {metric_type.value} metrics from {start_date} to {end_date}")
 
         current_date = start_date
-        total_records = 0
 
         while current_date <= end_date:
             try:
@@ -959,16 +1185,21 @@ class MetricsIngester(BaseIngester):
                 date_str = current_date.strftime("%Y%m%d")
                 hours = list(range(24)) if metric_type == MetricType.HOURLY else None
 
+                # Use custom limit if provided
+                effective_limit = api_limit if api_limit is not None else 1000
+                
                 for page_num, records in enumerate(
                     self.api_client.get_metrics(
                         metric_type=metric_type.value,
                         logins=logins,
-                        accountids=accountids,
+                        account_ids=account_ids,
                         dates=[date_str],
                         hours=hours,
+                        limit=effective_limit
                     )
                 ):
                     pages_received += 1
+                    logger.info(f"Processing page {page_num} with {len(records)} records", extra={"has_data": len(records) > 0})
 
                     for record in records:
                         try:
@@ -1009,14 +1240,14 @@ class MetricsIngester(BaseIngester):
                 if batch_data:
                     self._insert_batch(batch_data)
 
-                total_records += len(batch_data)
+                # Note: total_records is tracked in self.metrics.new_records by _insert_batch
 
                 # Save checkpoint after each date
                 self.checkpoint_manager.save_checkpoint(
                     {
                         "metric_type": metric_type.value,
                         "last_processed_date": current_date.strftime("%Y-%m-%d"),
-                        "total_records": total_records,
+                        "total_records": self.metrics.new_records,
                         "metrics": self.metrics.to_dict(),
                     }
                 )
@@ -1030,7 +1261,7 @@ class MetricsIngester(BaseIngester):
 
             current_date += timedelta(days=1)
 
-        return total_records
+        return self.metrics.new_records
 
     def _truncate_table(self):
         """Truncate the current table."""
@@ -1079,8 +1310,49 @@ class MetricsIngester(BaseIngester):
             
             processed_records.append(processed_record)
         
-        # Call parent's insert method with processed records
-        return super()._insert_batch(processed_records)
+        # Use manual upsert logic instead of database manager's plain INSERT
+        return self._insert_batch_with_upsert(processed_records)
+
+    def _insert_batch_with_upsert(self, batch_data: List[Dict[str, Any]]) -> int:
+        """Insert batch with proper ON CONFLICT handling for metrics tables."""
+        if not batch_data:
+            return 0
+            
+        try:
+            columns = list(batch_data[0].keys())
+            placeholders = ", ".join(["%s"] * len(columns))
+            columns_str = ", ".join(columns)
+            
+            # Get conflict clause based on table type
+            conflict_clause = self._get_conflict_clause(self.table_name)
+            
+            # Build update SET clause for ON CONFLICT
+            update_columns = [col for col in columns if col not in ['account_id', 'date', 'hour']]
+            update_set = ", ".join([f"{col} = EXCLUDED.{col}" for col in update_columns])
+            
+            query = f"""
+                INSERT INTO {self.table_name} ({columns_str})
+                VALUES ({placeholders})
+                {conflict_clause} {update_set}
+            """
+            
+            values = [
+                tuple(record[col] for col in columns) for record in batch_data
+            ]
+            
+            with self.db_manager.model_db.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    from psycopg2.extras import execute_batch
+                    execute_batch(cursor, query, values, page_size=1000)
+                    rows_affected = cursor.rowcount
+                    conn.commit()
+                    
+            logger.info(f"Inserted/updated {rows_affected} records into {self.table_name}")
+            return len(batch_data)
+            
+        except Exception as e:
+            logger.error(f"Failed to insert batch with upsert: {str(e)}")
+            raise
 
     def close(self):
         """Close the ingester and clean up resources."""
@@ -1105,52 +1377,94 @@ def main():
     parser = argparse.ArgumentParser(
         description="Ingest metrics data with comprehensive risk factors support"
     )
-    parser.add_argument(
+    
+    # Create subparsers for different ingestion strategies
+    subparsers = parser.add_subparsers(dest="strategy", help="Ingestion strategy")
+    
+    # Standard single-metric ingestion
+    standard_parser = subparsers.add_parser(
+        "standard", 
+        help="Standard single metric type ingestion"
+    )
+    standard_parser.add_argument(
         "metric_type",
         choices=["alltime", "daily", "hourly"],
         help="Type of metrics to ingest",
     )
-    parser.add_argument(
+    standard_parser.add_argument(
         "--start-date",
         type=lambda s: datetime.strptime(s, "%Y-%m-%d").date(),
         help="Start date for daily/hourly metrics (YYYY-MM-DD)",
     )
-    parser.add_argument(
+    standard_parser.add_argument(
         "--end-date",
         type=lambda s: datetime.strptime(s, "%Y-%m-%d").date(),
         help="End date for daily/hourly metrics (YYYY-MM-DD)",
     )
-    parser.add_argument("--logins", nargs="+", help="Specific login IDs to fetch")
-    parser.add_argument("--accountids", nargs="+", help="Specific account IDs to fetch")
-    parser.add_argument(
-        "--force-refresh",
+    standard_parser.add_argument("--logins", nargs="+", help="Specific login IDs to fetch")
+    standard_parser.add_argument("--accountIds", nargs="+", help="Specific account IDs to fetch")
+    
+    # Training-optimized ingestion
+    training_parser = subparsers.add_parser(
+        "training",
+        help="Training-optimized ingestion (daily first, then targeted alltime)"
+    )
+    training_parser.add_argument(
+        "start_date",
+        type=lambda s: datetime.strptime(s, "%Y-%m-%d").date(),
+        help="Start date for training period (YYYY-MM-DD)",
+    )
+    training_parser.add_argument(
+        "--end-date",
+        type=lambda s: datetime.strptime(s, "%Y-%m-%d").date(),
+        help="End date for training period (YYYY-MM-DD)",
+    )
+    training_parser.add_argument("--logins", nargs="+", help="Specific login IDs to fetch")
+    training_parser.add_argument(
+        "--no-hourly",
         action="store_true",
-        help="Force full refresh (truncate and reload)",
+        help="Skip hourly metrics ingestion (by default hourly metrics are included)"
     )
-    parser.add_argument(
-        "--no-resume", action="store_true", help="Do not resume from checkpoint"
-    )
-    parser.add_argument(
-        "--no-validation", action="store_true", help="Disable data validation"
-    )
-    parser.add_argument(
-        "--no-deduplication", action="store_true", help="Disable deduplication"
-    )
-    parser.add_argument("--checkpoint-dir", help="Directory for checkpoint files")
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        help="Set logging level",
-    )
+    
+    # Common arguments for both strategies
+    for subparser in [standard_parser, training_parser]:
+        subparser.add_argument(
+            "--force-refresh",
+            action="store_true",
+            help="Force full refresh (truncate and reload)",
+        )
+        subparser.add_argument(
+            "--no-resume", action="store_true", help="Do not resume from checkpoint"
+        )
+        subparser.add_argument(
+            "--no-validation", action="store_true", help="Disable data validation"
+        )
+        subparser.add_argument(
+            "--no-deduplication", action="store_true", help="Disable deduplication"
+        )
+        subparser.add_argument("--checkpoint-dir", help="Directory for checkpoint files")
+        subparser.add_argument(
+            "--log-level",
+            default="INFO",
+            choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+            help="Set logging level",
+        )
 
     args = parser.parse_args()
+
+    # Handle case where no strategy is specified (backward compatibility)
+    if args.strategy is None:
+        parser.error("Please specify a strategy: 'standard' or 'training'")
 
     # Set up logging
     from utils.logging_config import setup_logging
 
+    log_suffix = args.strategy
+    if args.strategy == "standard":
+        log_suffix = f"{args.strategy}_{args.metric_type}"
+    
     setup_logging(
-        log_level=args.log_level, log_file=f"ingest_metrics_{args.metric_type}"
+        log_level=args.log_level, log_file=f"ingest_metrics_{log_suffix}"
     )
 
     # Run ingestion
@@ -1161,16 +1475,31 @@ def main():
     )
 
     try:
-        records = ingester.ingest_metrics(
-            metric_type=args.metric_type,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            logins=args.logins,
-            accountids=args.accountids,
-            force_full_refresh=args.force_refresh,
-            resume_from_checkpoint=not args.no_resume,
-        )
-        logger.info(f"Ingestion complete. Total records: {records}")
+        if args.strategy == "training":
+            # Use the training-optimized approach
+            results = ingester.ingest_metrics_for_training(
+                start_date=args.start_date,
+                end_date=args.end_date,
+                logins=args.logins,
+                force_full_refresh=args.force_refresh,
+                resume_from_checkpoint=not args.no_resume,
+                include_hourly=not args.no_hourly,  # Include hourly by default unless --no-hourly is specified
+            )
+            total_records = sum(results.values())
+            logger.info(f"Training ingestion complete. Total records: {total_records}")
+            logger.info(f"  Daily: {results.get('daily', 0)}, Alltime: {results.get('alltime', 0)}, Hourly: {results.get('hourly', 0)}")
+        else:
+            # Use the standard single-metric approach  
+            records = ingester.ingest_metrics(
+                metric_type=args.metric_type,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                logins=args.logins,
+                account_ids=args.account_ids,
+                force_full_refresh=args.force_refresh,
+                resume_from_checkpoint=not args.no_resume,
+            )
+            logger.info(f"Standard ingestion complete. Total records: {records}")
     finally:
         ingester.close()
 

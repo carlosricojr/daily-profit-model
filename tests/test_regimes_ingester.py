@@ -144,6 +144,8 @@ class TestRegimesIngester(unittest.TestCase):
         # Mock model database for insert
         mock_model_conn = MagicMock()
         mock_model_cursor = MagicMock()
+        # Mock mogrify to return bytes as expected by execute_batch
+        mock_model_cursor.mogrify.return_value = b"mocked query"
         mock_model_conn.__enter__ = Mock(return_value=mock_model_conn)
         mock_model_conn.__exit__ = Mock(return_value=None)
         mock_model_conn.cursor.return_value.__enter__ = Mock(
@@ -289,7 +291,7 @@ class TestRegimesIngester(unittest.TestCase):
                 self.assertEqual(transformed["market_news"], value)
 
     def test_duplicate_handling(self):
-        """Test handling of duplicate regime records."""
+        """Test handling of duplicate regime records with ON CONFLICT DO UPDATE."""
         # Mock database connections
         mock_cursor = MagicMock()
         mock_conn = MagicMock()
@@ -301,6 +303,8 @@ class TestRegimesIngester(unittest.TestCase):
 
         mock_model_conn = MagicMock()
         mock_model_cursor = MagicMock()
+        # Mock mogrify to return bytes as expected by execute_batch
+        mock_model_cursor.mogrify.return_value = b"mocked query"
         mock_model_conn.__enter__ = Mock(return_value=mock_model_conn)
         mock_model_conn.__exit__ = Mock(return_value=None)
         mock_model_conn.cursor.return_value.__enter__ = Mock(
@@ -312,19 +316,19 @@ class TestRegimesIngester(unittest.TestCase):
         # Create duplicate data (same date)
         duplicate_date = date(2024, 1, 15)
         mock_data = [
-            (duplicate_date, {}, {}, {}, {}, {}, [0.1] * 5, None, None),
+            (duplicate_date, {"news": "initial"}, {}, {}, {}, {}, [0.1] * 5, None, None),
             (
                 duplicate_date,
+                {"news": "updated"},  # Updated content
                 {},
                 {},
                 {},
                 {},
-                {},
-                [0.2] * 5,
+                [0.2] * 5,  # Updated vector
                 None,
                 None,
-            ),  # Different vector but same date
-            (date(2024, 1, 16), {}, {}, {}, {}, {}, [0.3] * 5, None, None),
+            ),  # Same date will trigger update
+            (date(2024, 1, 16), {"news": "new"}, {}, {}, {}, {}, [0.3] * 5, None, None),
         ]
 
         mock_cursor.fetchmany.side_effect = [mock_data, []]
@@ -336,10 +340,54 @@ class TestRegimesIngester(unittest.TestCase):
             enable_deduplication=True,
         )
 
-        # Check metrics
+        # Check metrics - with in-memory deduplication, duplicate is still caught
         self.assertEqual(self.ingester.metrics.total_records, 3)
         self.assertEqual(self.ingester.metrics.new_records, 2)  # Only 2 unique dates
         self.assertEqual(self.ingester.metrics.duplicate_records, 1)
+
+    def test_on_conflict_update_behavior(self):
+        """Test ON CONFLICT DO UPDATE behavior without deduplication."""
+        # Mock database connections
+        mock_cursor = MagicMock()
+        mock_conn = MagicMock()
+        mock_conn.__enter__ = Mock(return_value=mock_conn)
+        mock_conn.__exit__ = Mock(return_value=None)
+        mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = Mock(return_value=None)
+        self.mock_source_db.get_connection.return_value = mock_conn
+
+        mock_model_conn = MagicMock()
+        mock_model_cursor = MagicMock()
+        # Mock mogrify to return bytes as expected by execute_batch
+        mock_model_cursor.mogrify.return_value = b"mocked query"
+        mock_model_conn.__enter__ = Mock(return_value=mock_model_conn)
+        mock_model_conn.__exit__ = Mock(return_value=None)
+        mock_model_conn.cursor.return_value.__enter__ = Mock(
+            return_value=mock_model_cursor
+        )
+        mock_model_conn.cursor.return_value.__exit__ = Mock(return_value=None)
+        self.mock_model_db.get_connection.return_value = mock_model_conn
+
+        # Create data that will be updated
+        test_date = date(2024, 1, 15)
+        mock_data = [
+            (test_date, {"news": "v1"}, {}, {}, {}, {"summary": "v1"}, [0.1] * 5, None, None),
+            (test_date, {"news": "v2"}, {}, {}, {}, {"summary": "v2"}, [0.2] * 5, None, None),
+        ]
+
+        mock_cursor.fetchmany.side_effect = [mock_data, []]
+
+        # Run without deduplication - all records go to DB
+        self.ingester.ingest_regimes(
+            start_date=date(2024, 1, 15),
+            end_date=date(2024, 1, 15),
+            enable_deduplication=False,
+        )
+
+        # All records processed via upsert
+        self.assertEqual(self.ingester.metrics.total_records, 2)
+        self.assertEqual(self.ingester.metrics.new_records, 2)
+        self.assertEqual(self.ingester.metrics.duplicate_records, 0)
 
 
 if __name__ == "__main__":

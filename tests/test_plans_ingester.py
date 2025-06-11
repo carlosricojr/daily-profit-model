@@ -129,20 +129,30 @@ class TestPlansIngester(unittest.TestCase):
         # Mock database operations
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
+        # Mock mogrify to return bytes as expected by execute_batch
+        mock_cursor.mogrify.return_value = b"mocked query"
         mock_conn.__enter__ = Mock(return_value=mock_conn)
         mock_conn.__exit__ = Mock(return_value=None)
         mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cursor)
         mock_conn.cursor.return_value.__exit__ = Mock(return_value=None)
         self.mock_model_db.get_connection.return_value = mock_conn
 
-        # Process CSV
-        result = self.ingester.ingest_plans(csv_directory=str(self.csv_dir))
+        # Track what gets passed to execute_batch
+        execute_batch_data = []
+        
+        def mock_execute_batch(cursor, query, values, page_size=None):
+            execute_batch_data.extend(values)
+        
+        # Patch execute_batch since PlansIngester uses it instead of executemany
+        with patch('psycopg2.extras.execute_batch', side_effect=mock_execute_batch):
+            # Process CSV
+            result = self.ingester.ingest_plans(csv_directory=str(self.csv_dir))
 
         self.assertEqual(result, 1)
 
         # Verify mapped correctly
-        insert_call = mock_cursor.executemany.call_args
-        inserted_data = insert_call[0][1][0]  # First record
+        self.assertEqual(len(execute_batch_data), 1)
+        inserted_data = execute_batch_data[0]  # First record (tuple)
 
         # Check mapping worked (column order depends on implementation)
         self.assertIn("PLAN123", inserted_data)  # plan_id
@@ -222,6 +232,8 @@ class TestPlansIngester(unittest.TestCase):
         # Mock database operations
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
+        # Mock mogrify to return bytes as expected by execute_batch
+        mock_cursor.mogrify.return_value = b"mocked query"
         mock_conn.__enter__ = Mock(return_value=mock_conn)
         mock_conn.__exit__ = Mock(return_value=None)
         mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cursor)
@@ -250,6 +262,8 @@ class TestPlansIngester(unittest.TestCase):
         # Mock database operations
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
+        # Mock mogrify to return bytes as expected by execute_batch
+        mock_cursor.mogrify.return_value = b"mocked query"
         mock_conn.__enter__ = Mock(return_value=mock_conn)
         mock_conn.__exit__ = Mock(return_value=None)
         mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cursor)
@@ -277,36 +291,86 @@ class TestPlansIngester(unittest.TestCase):
         )  # PLAN2, PLAN3, PLAN4
 
     def test_duplicate_plan_handling(self):
-        """Test handling of duplicate plans."""
+        """Test handling of duplicate plans with ON CONFLICT DO UPDATE."""
         # Create CSV with duplicates
         data = [
             {"plan_id": "PLAN1", "plan_name": "Plan 1", "starting_balance": 10000},
             {
                 "plan_id": "PLAN1",
-                "plan_name": "Plan 1 Dup",
-                "starting_balance": 10000,
-            },  # Duplicate
+                "plan_name": "Plan 1 Updated",  # Updated name
+                "starting_balance": 15000,      # Updated balance
+            },  # Duplicate that will update
             {"plan_id": "PLAN2", "plan_name": "Plan 2", "starting_balance": 20000},
         ]
 
         self.create_test_csv("duplicate_plans.csv", data)
 
-        # Mock database operations
+        # Mock database operations with execute_batch
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
+        # Mock mogrify to return bytes as expected by execute_batch
+        mock_cursor.mogrify.return_value = b"mocked query"
         mock_conn.__enter__ = Mock(return_value=mock_conn)
         mock_conn.__exit__ = Mock(return_value=None)
         mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cursor)
         mock_conn.cursor.return_value.__exit__ = Mock(return_value=None)
         self.mock_model_db.get_connection.return_value = mock_conn
 
-        # Process with deduplication
+        # Process with deduplication enabled
         result = self.ingester.ingest_plans(
             csv_directory=str(self.csv_dir), enable_deduplication=True
         )
 
-        self.assertEqual(result, 2)  # Only unique plans
+        # With in-memory deduplication, duplicate is still skipped before DB insert
+        self.assertEqual(result, 2)  # Only unique plans based on plan_id
         self.assertEqual(self.ingester.metrics.duplicate_records, 1)
+
+    def test_on_conflict_update_behavior(self):
+        """Test that ON CONFLICT DO UPDATE works correctly when deduplication is disabled."""
+        # Create CSV with a record that will be inserted then updated
+        data = [
+            {"plan_id": "PLAN1", "plan_name": "Initial Plan", "starting_balance": 10000, 
+             "profit_target_pct": 10, "max_drawdown_pct": 5}
+        ]
+        self.create_test_csv("initial_plans.csv", data)
+
+        # Mock database operations
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        # Mock mogrify to return bytes as expected by execute_batch
+        mock_cursor.mogrify.return_value = b"mocked query"
+        mock_conn.__enter__ = Mock(return_value=mock_conn)
+        mock_conn.__exit__ = Mock(return_value=None)
+        mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = Mock(return_value=None)
+        self.mock_model_db.get_connection.return_value = mock_conn
+
+        # Process without deduplication - all records go to DB
+        result = self.ingester.ingest_plans(
+            csv_directory=str(self.csv_dir), enable_deduplication=False
+        )
+        self.assertEqual(result, 1)
+
+        # Now create updated data
+        updated_data = [
+            {"plan_id": "PLAN1", "plan_name": "Updated Plan", "starting_balance": 20000,
+             "profit_target_pct": 15, "max_drawdown_pct": 8}
+        ]
+        self.create_test_csv("updated_plans.csv", updated_data)
+
+        # Reset metrics
+        self.ingester.metrics = self.ingester.metrics.__class__()
+        self.ingester.metrics.files_processed = 0
+
+        # Process updated data
+        result = self.ingester.ingest_plans(
+            specific_files=[self.csv_dir / "updated_plans.csv"], 
+            enable_deduplication=False
+        )
+        
+        # All records processed (upserted)
+        self.assertEqual(result, 1)
+        self.assertEqual(self.ingester.metrics.duplicate_records, 0)
 
     def test_specific_files_processing(self):
         """Test processing specific CSV files only."""
@@ -324,6 +388,8 @@ class TestPlansIngester(unittest.TestCase):
         # Mock database operations
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
+        # Mock mogrify to return bytes as expected by execute_batch
+        mock_cursor.mogrify.return_value = b"mocked query"
         mock_conn.__enter__ = Mock(return_value=mock_conn)
         mock_conn.__exit__ = Mock(return_value=None)
         mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cursor)
@@ -362,6 +428,8 @@ class TestPlansIngester(unittest.TestCase):
         # Mock database operations
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
+        # Mock mogrify to return bytes as expected by execute_batch
+        mock_cursor.mogrify.return_value = b"mocked query"
         mock_conn.__enter__ = Mock(return_value=mock_conn)
         mock_conn.__exit__ = Mock(return_value=None)
         mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cursor)

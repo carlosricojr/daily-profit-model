@@ -1,0 +1,20 @@
+{
+  "metric_type": "hourly",
+  "completion_time": "2025-06-11T02:53:16.535698",
+  "total_records": 26,
+  "metrics": {
+    "total_records": 0,
+    "new_records": 26,
+    "duplicate_records": 0,
+    "invalid_records": 0,
+    "api_calls": 0,
+    "api_errors": 0,
+    "db_errors": 0,
+    "validation_errors": {},
+    "start_time": 1749624794.095038,
+    "processing_time": 2.4406650066375732,
+    "records_per_second": 0.0
+  },
+  "timestamp": "2025-06-11T02:53:16.535705",
+  "ingestion_type": "metrics_hourly"
+}

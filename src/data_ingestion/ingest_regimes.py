@@ -39,7 +39,7 @@ class RegimesIngester(BaseIngester):
         """Initialize the enhanced regimes ingester."""
         super().__init__(
             ingestion_type="regimes",
-            table_name="raw_regimes_daily",
+            table_name="prop_trading_model.raw_regimes_daily",
             checkpoint_dir=checkpoint_dir,
             enable_validation=enable_validation,
             enable_deduplication=enable_deduplication,
@@ -167,9 +167,59 @@ class RegimesIngester(BaseIngester):
 
         return record
 
+    def _insert_batch(self, batch_data: List[Dict[str, Any]], table_name: Optional[str] = None) -> bool:
+        """Override base class to use custom ON CONFLICT logic for regimes."""
+        if not batch_data:
+            return True
+            
+        if table_name is None:
+            table_name = self.table_name
+            
+        try:
+            columns = list(batch_data[0].keys())
+            placeholders = ", ".join(["%s"] * len(columns))
+            columns_str = ", ".join(columns)
+            
+            # Use our custom ON CONFLICT clause
+            conflict_clause = self._get_conflict_clause(table_name)
+            
+            query = f"""
+                INSERT INTO {table_name} ({columns_str})
+                VALUES ({placeholders})
+                {conflict_clause}
+            """
+            
+            values = [
+                tuple(record[col] for col in columns) for record in batch_data
+            ]
+            
+            with self.db_manager.model_db.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    from psycopg2.extras import execute_batch
+                    execute_batch(cursor, query, values, page_size=1000)
+                    conn.commit()
+                    
+            logger.debug(f"Successfully inserted/updated {len(batch_data)} records")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to insert batch: {str(e)}")
+            raise
+
     def _get_conflict_clause(self, table_name: str) -> str:
-        """Get ON CONFLICT clause for regimes table."""
-        return "ON CONFLICT (date, ingestion_timestamp) DO NOTHING"
+        """Get ON CONFLICT clause for regimes table with proper upsert logic."""
+        return """
+        ON CONFLICT (date) DO UPDATE SET
+            market_news = EXCLUDED.market_news,
+            instruments = EXCLUDED.instruments,
+            country_economic_indicators = EXCLUDED.country_economic_indicators,
+            news_analysis = EXCLUDED.news_analysis,
+            summary = EXCLUDED.summary,
+            vector_daily_regime = EXCLUDED.vector_daily_regime,
+            updated_at = EXCLUDED.updated_at,
+            ingestion_timestamp = EXCLUDED.ingestion_timestamp,
+            source_table = EXCLUDED.source_table
+        """
 
     def _get_latest_date(self) -> Optional[date]:
         """Get the latest date in the target table."""

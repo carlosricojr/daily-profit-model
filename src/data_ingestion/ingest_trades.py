@@ -1,6 +1,6 @@
 """
 Ingest trades data from the /trades API endpoints (closed and open).
-Handles the large volume of closed trades (81M records) efficiently.
+Handles the large volume of closed trades (80M+ records) efficiently.
 """
 
 import os
@@ -16,11 +16,27 @@ import argparse
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.database import get_db_manager
-from utils.api_client import RiskAnalyticsAPIClient
+# Import logging first to ensure it's available
 from utils.logging_config import setup_logging, get_logger
 
+# Get logger immediately after import
 logger = get_logger(__name__)
+logger.info("Module ingest_trades.py loaded successfully")
+
+# Now import the rest
+try:
+    from utils.database import get_db_manager
+    logger.info("Successfully imported get_db_manager")
+except Exception as e:
+    logger.error(f"Failed to import get_db_manager: {str(e)}", exc_info=True)
+    raise
+
+try:
+    from utils.api_client import RiskAnalyticsAPIClient
+    logger.info("Successfully imported RiskAnalyticsAPIClient")
+except Exception as e:
+    logger.error(f"Failed to import RiskAnalyticsAPIClient: {str(e)}", exc_info=True)
+    raise
 
 
 @dataclass
@@ -51,9 +67,13 @@ class IngestionMetrics:
 class CheckpointManager:
     """Simple JSON-based checkpoint manager for resilience."""
 
-    def __init__(self, checkpoint_dir: str = ".checkpoints"):
+    def __init__(self, checkpoint_dir: str = None):
+        if checkpoint_dir is None:
+            # Use the same checkpoint directory as other ingesters
+            checkpoint_dir = os.path.join(os.path.dirname(__file__), "checkpoints")
         self.checkpoint_dir = Path(checkpoint_dir)
         self.checkpoint_dir.mkdir(exist_ok=True)
+        logger.debug(f"CheckpointManager initialized with directory: {self.checkpoint_dir}")
 
     def save_checkpoint(self, stage: str, data: Dict[str, Any]):
         """Save checkpoint to JSON file."""
@@ -83,14 +103,37 @@ class TradesIngester:
 
     def __init__(self, enable_validation: bool = True):
         """Initialize the trades ingester with enhanced features."""
-        self.db_manager = get_db_manager()
-        self.api_client = RiskAnalyticsAPIClient()
-        self.checkpoint_manager = CheckpointManager()
+        logger.info("Initializing TradesIngester")
+        try:
+            logger.info("Getting database manager...")
+            self.db_manager = get_db_manager()
+            logger.info("Database manager obtained successfully")
+        except Exception as e:
+            logger.error(f"Failed to get database manager: {str(e)}", exc_info=True)
+            raise
+            
+        try:
+            logger.info("Creating API client...")
+            self.api_client = RiskAnalyticsAPIClient()
+            logger.info("API client created successfully")
+        except Exception as e:
+            logger.error(f"Failed to create API client: {str(e)}", exc_info=True)
+            raise
+            
+        try:
+            logger.info("Creating checkpoint manager...")
+            self.checkpoint_manager = CheckpointManager()
+            logger.info("Checkpoint manager created successfully")
+        except Exception as e:
+            logger.error(f"Failed to create checkpoint manager: {str(e)}", exc_info=True)
+            raise
+            
         self.metrics = IngestionMetrics()
         self.enable_validation = enable_validation
 
         # Table mapping for trade types
-        self.table_mapping = {"closed": "raw_trades_closed", "open": "raw_trades_open"}
+        self.table_mapping = {"closed": "prop_trading_model.raw_trades_closed", "open": "prop_trading_model.raw_trades_open"}
+        logger.info(f"TradesIngester initialized successfully. Validation enabled: {enable_validation}")
 
     def ingest_trades(
         self,
@@ -172,6 +215,9 @@ class TradesIngester:
                 else:
                     # For closed trades, default to last 30 days for initial load
                     start_date = end_date - timedelta(days=30)
+            
+            logger.info(f"Date range determined - Start: {start_date}, End: {end_date}")
+            logger.info(f"Filters - Logins: {logins}, Symbols: {symbols}")
 
             # Ingest trades
             if trade_type == "closed":
@@ -263,10 +309,15 @@ class TradesIngester:
             # Format dates for API
             start_str = self.api_client.format_date(current_start)
             end_str = self.api_client.format_date(current_end)
+            logger.info(f"Formatted dates for API: start={start_str}, end={end_str}")
 
             # Fetch trades for this date range
             try:
                 self.metrics.api_calls += 1
+                logger.info(f"Starting API call for closed trades from {start_str} to {end_str}")
+                page_count = 0
+                trades_in_batch = 0
+                
                 for page_num, trades_page in enumerate(
                     self.api_client.get_trades(
                         trade_type="closed",
@@ -276,10 +327,12 @@ class TradesIngester:
                         trade_date_to=end_str,
                     )
                 ):
-                    if page_num % 10 == 0:  # Log progress every 10 pages
-                        logger.info(
-                            f"Processing page {page_num + 1} for dates {start_str}-{end_str}"
-                        )
+                    page_count += 1
+                    trades_in_batch += len(trades_page)
+                    
+                    logger.info(
+                        f"Received page {page_num + 1} with {len(trades_page)} trades for dates {start_str}-{end_str}"
+                    )
 
                     for trade in trades_page:
                         # Validate trade if enabled
@@ -291,9 +344,10 @@ class TradesIngester:
                                 self.metrics.invalid_records += 1
                                 for error in errors:
                                     self.metrics.validation_errors[error] += 1
-                                logger.debug(
-                                    f"Invalid closed trade {trade.get('position')}: {errors}"
-                                )
+                                if self.metrics.invalid_records <= 5:  # Log first 5 invalid trades in detail
+                                    logger.warning(
+                                        f"Invalid closed trade {trade.get('position')}: {errors}. Sample trade data: {trade}"
+                                    )
                                 continue
 
                         record = self._transform_closed_trade(trade)
@@ -306,18 +360,27 @@ class TradesIngester:
                             batch_data = []
 
                             # Log progress for large datasets
-                            if self.metrics.total_records % 50000 == 0:
+                            if self.metrics.total_records % 10000 == 0:
                                 logger.info(
-                                    f"Progress: {self.metrics.total_records:,} records processed"
+                                    f"Progress: {self.metrics.total_records:,} records processed, "
+                                    f"{self.metrics.new_records:,} new, {self.metrics.duplicate_records:,} duplicates"
                                 )
-
+                
+                # Check if we received any data
+                if page_count == 0:
+                    logger.warning(f"No pages returned from API for {current_start} to {current_end}")
+                else:
+                    logger.info(f"Completed date batch {current_start} to {current_end}: "
+                               f"{page_count} pages, {trades_in_batch} trades received")
+                
                 # Save checkpoint after each date batch
                 self._save_checkpoint("closed", current_end)
 
             except Exception as e:
                 self.metrics.api_errors += 1
                 logger.error(
-                    f"API error for closed trades {current_start} to {current_end}: {str(e)}"
+                    f"API error for closed trades {current_start} to {current_end}: {str(e)}",
+                    exc_info=True
                 )
                 # Re-raise to maintain existing behavior
                 raise
@@ -327,9 +390,11 @@ class TradesIngester:
 
         # Insert remaining records
         if batch_data:
+            logger.info(f"Inserting final batch of {len(batch_data)} records for closed trades")
             self._insert_trades_batch(batch_data, table_name)
             total_records += len(batch_data)
-
+        
+        logger.info(f"Closed trades ingestion complete. Total new records: {self.metrics.new_records}")
         return self.metrics.new_records
 
     def _ingest_open_trades(
@@ -497,37 +562,21 @@ class TradesIngester:
         """Validate trade record and return validation errors."""
         errors = []
 
-        # Required fields - updated to match actual API response
+        # Required fields - only check for truly required fields
+        # Many fields might be optional in the API response
         required_fields = [
             "tradeDate",
-            "broker",
-            "mngr",
             "platform",
-            "ticket",
             "position",
             "login",
-            "trdSymbol",
-            "stdSymbol",
             "side",
-            "lots",
-            "contractSize",
-            "qtyInBaseCrncy",
-            "volumeUSD",
-            "stopLoss",
-            "takeProfit",
             "openTime",
             "openPrice",
-            "closeTime",
-            "closePrice",
-            "duration",
-            "profit",
-            "commission",
-            "fee",
-            "swap",
-            "comment",
-            "client_margin",
-            "firm_margin",
         ]
+        
+        # For closed trades, also require close fields
+        if trade_type == "closed":
+            required_fields.extend(["closeTime", "closePrice"])
 
         for field in required_fields:
             if field not in trade:
@@ -543,8 +592,10 @@ class TradesIngester:
                 errors.append("Invalid lots value")
 
         # Validate side
-        if trade.get("side") and str(trade["side"]).lower() not in ["Buy", "Sell", "buy", "sell", "BUY", "SELL"]:
-            errors.append(f"Invalid side: {trade.get('side')}")
+        if trade.get("side"):
+            side_lower = str(trade["side"]).lower()
+            if side_lower not in ["buy", "sell"]:
+                errors.append(f"Invalid side: {trade.get('side')}")
 
         # Validate timestamps
         if trade_type == "closed" and trade.get("openTime") and trade.get("closeTime"):
@@ -601,7 +652,7 @@ class TradesIngester:
                     cursor.execute(f"""
                         UPDATE {table_name} t
                         SET account_id = m.account_id
-                        FROM raw_metrics_alltime m
+                        FROM prop_trading_model.raw_metrics_alltime m
                         WHERE t.login = m.login
                         AND t.platform = m.platform
                         AND t.broker = m.broker
@@ -645,7 +696,7 @@ class TradesIngester:
                     logger.info("Validating account_id uniqueness constraints")
                     cursor.execute("""
                         SELECT login, platform, broker, COUNT(DISTINCT account_id) as account_count
-                        FROM raw_metrics_alltime
+                        FROM prop_trading_model.raw_metrics_alltime
                         WHERE login IS NOT NULL 
                         AND platform IS NOT NULL 
                         AND broker IS NOT NULL
@@ -705,7 +756,8 @@ class TradesIngester:
         """Insert a batch of trade records into the database."""
         if not batch_data:
             return True
-
+        
+        logger.debug(f"Attempting to insert batch of {len(batch_data)} records into {table_name}")
         new_records = 0  # Initialize to avoid reference error
         try:
             # Build the insert query
@@ -718,51 +770,105 @@ class TradesIngester:
             VALUES ({placeholders})
             """
 
-            # Use ON CONFLICT to handle duplicates gracefully
-            # Using composite key from schema: (platform, position, trade_date) for closed trades
-            if table_name == "raw_trades_closed":
-                query += """
-                ON CONFLICT (platform, position, trade_date) DO NOTHING
-                """
-            else:
-                # For open trades: (platform, position, ingestion_timestamp)
-                query += """
-                ON CONFLICT (platform, position, ingestion_timestamp) DO NOTHING
-                """
+            # Get conflict clause
+            conflict_clause = self._get_conflict_clause(table_name)
+            query += conflict_clause
 
             # Convert to list of tuples
             values = [tuple(record[col] for col in columns) for record in batch_data]
+            
+            logger.debug(f"Prepared {len(values)} value tuples for insertion")
 
             with self.db_manager.model_db.get_connection() as conn:
                 with conn.cursor() as cursor:
                     # Get count before insert
                     cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
                     before_count = cursor.fetchone()[0]
+                    logger.debug(f"Table {table_name} has {before_count} records before insert")
 
                     # Insert batch
                     cursor.executemany(query, values)
+                    conn.commit()
+                    logger.debug(f"Executed batch insert and committed")
 
                     # Get count after insert
                     cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
                     after_count = cursor.fetchone()[0]
+                    logger.debug(f"Table {table_name} has {after_count} records after insert")
 
                     # Calculate new vs duplicate records
                     new_records = after_count - before_count
                     self.metrics.new_records += new_records
                     self.metrics.duplicate_records += len(batch_data) - new_records
 
-            logger.debug(
-                f"Inserted {new_records} new records from batch of {len(batch_data)}"
+            logger.info(
+                f"Batch insert complete: {new_records} new records, {len(batch_data) - new_records} duplicates"
             )
             return True
 
         except Exception as e:
-            logger.error(f"Failed to insert batch into {table_name}: {str(e)}")
+            logger.error(f"Failed to insert batch into {table_name}: {str(e)}", exc_info=True)
             self.metrics.db_errors += 1
             # Log sample of problematic data for debugging
             if batch_data:
                 logger.error(f"Sample record: {batch_data[0]}")
-            return False
+                logger.error(f"Batch size: {len(batch_data)}, Columns: {columns}")
+            raise  # Re-raise to stop processing
+
+    def _get_conflict_clause(self, table_name: str) -> str:
+        """Get conflict clause based on table type with proper upsert logic."""
+        if "closed" in table_name:
+            return """
+            ON CONFLICT (position, login, platform, broker, trade_date) DO UPDATE SET
+                manager = EXCLUDED.manager,
+                ticket = EXCLUDED.ticket,
+                account_id = EXCLUDED.account_id,
+                std_symbol = EXCLUDED.std_symbol,
+                side = EXCLUDED.side,
+                lots = EXCLUDED.lots,
+                contract_size = EXCLUDED.contract_size,
+                qty_in_base_ccy = EXCLUDED.qty_in_base_ccy,
+                volume_usd = EXCLUDED.volume_usd,
+                stop_loss = EXCLUDED.stop_loss,
+                take_profit = EXCLUDED.take_profit,
+                open_time = EXCLUDED.open_time,
+                open_price = EXCLUDED.open_price,
+                close_time = EXCLUDED.close_time,
+                close_price = EXCLUDED.close_price,
+                duration = EXCLUDED.duration,
+                profit = EXCLUDED.profit,
+                commission = EXCLUDED.commission,
+                fee = EXCLUDED.fee,
+                swap = EXCLUDED.swap,
+                comment = EXCLUDED.comment,
+                ingestion_timestamp = EXCLUDED.ingestion_timestamp,
+                source_api_endpoint = EXCLUDED.source_api_endpoint
+            """
+        else:  # open trades
+            return """
+            ON CONFLICT (position, login, platform, broker, trade_date) DO UPDATE SET
+                manager = EXCLUDED.manager,
+                ticket = EXCLUDED.ticket,
+                account_id = EXCLUDED.account_id,
+                std_symbol = EXCLUDED.std_symbol,
+                side = EXCLUDED.side,
+                lots = EXCLUDED.lots,
+                contract_size = EXCLUDED.contract_size,
+                qty_in_base_ccy = EXCLUDED.qty_in_base_ccy,
+                volume_usd = EXCLUDED.volume_usd,
+                stop_loss = EXCLUDED.stop_loss,
+                take_profit = EXCLUDED.take_profit,
+                open_time = EXCLUDED.open_time,
+                open_price = EXCLUDED.open_price,
+                duration = EXCLUDED.duration,
+                unrealized_profit = EXCLUDED.unrealized_profit,
+                commission = EXCLUDED.commission,
+                fee = EXCLUDED.fee,
+                swap = EXCLUDED.swap,
+                comment = EXCLUDED.comment,
+                ingestion_timestamp = EXCLUDED.ingestion_timestamp,
+                source_api_endpoint = EXCLUDED.source_api_endpoint
+            """
 
     def close(self):
         """Clean up resources."""
@@ -780,6 +886,9 @@ def ingest_trades_closed(**kwargs):
 
 def main():
     """Main function for command-line execution."""
+    # Early logging to debug startup issues
+    print(f"ingest_trades.py main() called at {datetime.now()}")
+    
     parser = argparse.ArgumentParser(
         description="Ingest trades data from Risk Analytics API"
     )
@@ -817,12 +926,16 @@ def main():
     )
 
     args = parser.parse_args()
+    print(f"Arguments parsed: {args}")
 
     # Set up logging
     setup_logging(log_level=args.log_level, log_file=f"ingest_trades_{args.trade_type}")
+    logger.info(f"main() function started with args: {args}")
 
     # Run ingestion
+    logger.info("Creating TradesIngester instance...")
     ingester = TradesIngester()
+    logger.info("TradesIngester instance created successfully")
     try:
         records = ingester.ingest_trades(
             trade_type=args.trade_type,

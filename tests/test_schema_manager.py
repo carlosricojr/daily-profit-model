@@ -715,7 +715,8 @@ class TestSchemaManager:
                                 mock_conn.cursor = Mock(return_value=mock_cursor)
                                 mock_cursor.__enter__ = Mock(return_value=mock_cursor)
                                 mock_cursor.__exit__ = Mock(return_value=None)
-                                mock_cursor.fetchone.return_value = (True,)  # Schema exists
+                                # Mock responses: first call for schema existence (True), then False for essential tables
+                                mock_cursor.fetchone.side_effect = [(True,), (False,)]  # Schema exists, but essential tables don't
                                 mock_db_manager.model_db.get_connection.return_value = mock_conn
                                 
                                 # Ensure migrations directory exists

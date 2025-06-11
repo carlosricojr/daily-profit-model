@@ -43,8 +43,7 @@ class PipelineOrchestrator:
                     ("ingest_accounts", "data_ingestion.ingest_accounts"),
                     ("ingest_plans", "data_ingestion.ingest_plans"),
                     ("ingest_regimes", "data_ingestion.ingest_regimes"),
-                    ("ingest_metrics_alltime", "data_ingestion.ingest_metrics"),
-                    ("ingest_metrics_daily", "data_ingestion.ingest_metrics"),
+                    ("ingest_metrics_optimized", "data_ingestion.ingest_metrics"),
                     ("ingest_trades_open", "data_ingestion.ingest_trades"),
                     ("ingest_trades_closed", "data_ingestion.ingest_trades"),
                 ],
@@ -261,14 +260,11 @@ class PipelineOrchestrator:
         commands = [
             # Plans first - from CSV (no dependencies)
             ("ingest_plans", ["--csv-dir", "../raw-data/plans", "--log-level", "INFO"]),
-            # Metrics alltime - to get initial logins
-            ("ingest_metrics_alltime", ["alltime", "--log-level", "INFO"]),
-            # Metrics daily - more logins
+            # Optimized metrics ingestion - daily first, then targeted alltime
             (
-                "ingest_metrics_daily",
+                "ingest_metrics_optimized",
                 [
-                    "daily",
-                    "--start-date",
+                    "training",
                     str(start_date) if start_date else "2024-01-01",
                     "--end-date",
                     str(end_date)
@@ -549,8 +545,9 @@ class PipelineOrchestrator:
             # Run with environment variables
             env = os.environ.copy()
 
+            # Run without capturing output - let it flow to console
             result = subprocess.run(
-                cmd, cwd=self.src_dir, env=env, capture_output=True, text=True
+                cmd, cwd=self.src_dir, env=env
             )
 
             if result.returncode == 0:
@@ -558,7 +555,6 @@ class PipelineOrchestrator:
                 return True
             else:
                 logger.error(f"Failed to execute {module}")
-                logger.error(f"Error output: {result.stderr}")
                 return False
 
         except Exception as e:
@@ -590,15 +586,15 @@ def main():
         epilog="""
 Available stages:
   schema              - Ensure database schema compliance (intelligently migrates without data loss)
-  ingestion          - Ingest data from APIs and CSV files
+  ingestion          - Ingest data from APIs and CSV files (uses optimized metrics ingestion)
   preprocessing      - Create staging snapshots and clean data
   feature_engineering - Engineer features and build training data
   training           - Train the LightGBM model
   prediction         - Generate daily predictions
 
 Examples:
-  # Run the entire pipeline (with intelligent schema updates)
-  python run_pipeline.py
+  # Run the entire pipeline with date range (optimized for testing)
+  python run_pipeline.py --start-date 2025-06-05 --end-date 2025-06-10
   
   # Check what schema changes would be made without applying them
   python run_pipeline.py --stages schema --dry-run
@@ -606,14 +602,14 @@ Examples:
   # Force recreate schema from scratch (DESTROYS ALL DATA!)
   python run_pipeline.py --stages schema --force-recreate-schema
   
-  # Run only ingestion and preprocessing
-  python run_pipeline.py --stages ingestion preprocessing
+  # Run only ingestion and preprocessing with date range
+  python run_pipeline.py --stages ingestion preprocessing --start-date 2025-06-05 --end-date 2025-06-10
   
   # Run daily prediction only
   python run_pipeline.py --stages prediction
   
-  # Dry run to see what would be executed
-  python run_pipeline.py --dry-run
+  # Dry run to see what would be executed with date range
+  python run_pipeline.py --start-date 2025-06-05 --end-date 2025-06-10 --dry-run
         """,
     )
 

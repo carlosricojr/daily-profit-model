@@ -145,7 +145,7 @@ class PlansIngester(BaseIngester):
         """Initialize the enhanced plans ingester."""
         super().__init__(
             ingestion_type="plans",
-            table_name="raw_plans_data",
+            table_name="prop_trading_model.raw_plans_data",
             checkpoint_dir=checkpoint_dir,
             enable_validation=enable_validation,
             enable_deduplication=enable_deduplication,
@@ -358,8 +358,90 @@ class PlansIngester(BaseIngester):
         }
 
     def _get_conflict_clause(self, table_name: str) -> str:
-        """Get ON CONFLICT clause for plans table."""
-        return "ON CONFLICT (plan_id, ingestion_timestamp) DO NOTHING"
+        """Get ON CONFLICT clause for plans table with comprehensive upsert."""
+        return """
+        ON CONFLICT (plan_id) DO UPDATE SET
+            plan_name = EXCLUDED.plan_name,
+            plan_type = EXCLUDED.plan_type,
+            starting_balance = EXCLUDED.starting_balance,
+            profit_target = EXCLUDED.profit_target,
+            profit_target_pct = EXCLUDED.profit_target_pct,
+            max_drawdown = EXCLUDED.max_drawdown,
+            max_drawdown_pct = EXCLUDED.max_drawdown_pct,
+            max_daily_drawdown = EXCLUDED.max_daily_drawdown,
+            max_daily_drawdown_pct = EXCLUDED.max_daily_drawdown_pct,
+            max_leverage = EXCLUDED.max_leverage,
+            is_drawdown_relative = EXCLUDED.is_drawdown_relative,
+            min_trading_days = EXCLUDED.min_trading_days,
+            max_trading_days = EXCLUDED.max_trading_days,
+            profit_share_pct = EXCLUDED.profit_share_pct,
+            liquidate_friday = EXCLUDED.liquidate_friday,
+            inactivity_period = EXCLUDED.inactivity_period,
+            daily_drawdown_by_balance_equity = EXCLUDED.daily_drawdown_by_balance_equity,
+            enable_consistency = EXCLUDED.enable_consistency,
+            updated_at = CURRENT_TIMESTAMP,
+            ingestion_timestamp = EXCLUDED.ingestion_timestamp,
+            source_api_endpoint = EXCLUDED.source_api_endpoint
+        WHERE 
+            prop_trading_model.raw_plans_data.plan_name IS DISTINCT FROM EXCLUDED.plan_name OR
+            prop_trading_model.raw_plans_data.plan_type IS DISTINCT FROM EXCLUDED.plan_type OR
+            prop_trading_model.raw_plans_data.starting_balance IS DISTINCT FROM EXCLUDED.starting_balance OR
+            prop_trading_model.raw_plans_data.profit_target IS DISTINCT FROM EXCLUDED.profit_target OR
+            prop_trading_model.raw_plans_data.profit_target_pct IS DISTINCT FROM EXCLUDED.profit_target_pct OR
+            prop_trading_model.raw_plans_data.max_drawdown IS DISTINCT FROM EXCLUDED.max_drawdown OR
+            prop_trading_model.raw_plans_data.max_drawdown_pct IS DISTINCT FROM EXCLUDED.max_drawdown_pct OR
+            prop_trading_model.raw_plans_data.max_daily_drawdown IS DISTINCT FROM EXCLUDED.max_daily_drawdown OR
+            prop_trading_model.raw_plans_data.max_daily_drawdown_pct IS DISTINCT FROM EXCLUDED.max_daily_drawdown_pct OR
+            prop_trading_model.raw_plans_data.max_leverage IS DISTINCT FROM EXCLUDED.max_leverage OR
+            prop_trading_model.raw_plans_data.is_drawdown_relative IS DISTINCT FROM EXCLUDED.is_drawdown_relative OR
+            prop_trading_model.raw_plans_data.min_trading_days IS DISTINCT FROM EXCLUDED.min_trading_days OR
+            prop_trading_model.raw_plans_data.max_trading_days IS DISTINCT FROM EXCLUDED.max_trading_days OR
+            prop_trading_model.raw_plans_data.profit_share_pct IS DISTINCT FROM EXCLUDED.profit_share_pct OR
+            prop_trading_model.raw_plans_data.liquidate_friday IS DISTINCT FROM EXCLUDED.liquidate_friday OR
+            prop_trading_model.raw_plans_data.inactivity_period IS DISTINCT FROM EXCLUDED.inactivity_period OR
+            prop_trading_model.raw_plans_data.daily_drawdown_by_balance_equity IS DISTINCT FROM EXCLUDED.daily_drawdown_by_balance_equity OR
+            prop_trading_model.raw_plans_data.enable_consistency IS DISTINCT FROM EXCLUDED.enable_consistency OR
+            prop_trading_model.raw_plans_data.source_api_endpoint IS DISTINCT FROM EXCLUDED.source_api_endpoint
+        """
+
+    def _insert_batch(self, batch_data: List[Dict[str, Any]], table_name: Optional[str] = None) -> bool:
+        """Override base class to use custom ON CONFLICT logic for plans."""
+        if not batch_data:
+            return True
+            
+        if table_name is None:
+            table_name = self.table_name
+            
+        try:
+            columns = list(batch_data[0].keys())
+            placeholders = ", ".join(["%s"] * len(columns))
+            columns_str = ", ".join(columns)
+            
+            # Use our custom ON CONFLICT clause
+            conflict_clause = self._get_conflict_clause(table_name)
+            
+            query = f"""
+                INSERT INTO {table_name} ({columns_str})
+                VALUES ({placeholders})
+                {conflict_clause}
+            """
+            
+            values = [
+                tuple(record[col] for col in columns) for record in batch_data
+            ]
+            
+            with self.db_manager.model_db.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    from psycopg2.extras import execute_batch
+                    execute_batch(cursor, query, values, page_size=1000)
+                    conn.commit()
+                    
+            logger.debug(f"Successfully inserted/updated {len(batch_data)} records")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to insert batch: {str(e)}")
+            raise
 
     def _process_csv_file(
         self, file_path: Path, checkpoint: Optional[Dict[str, Any]] = None

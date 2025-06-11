@@ -352,14 +352,16 @@ class TestTradesIngester:
     @patch("data_ingestion.ingest_trades.get_db_manager")
     @patch("data_ingestion.ingest_trades.RiskAnalyticsAPIClient")
     def test_duplicate_handling(self, mock_api_client, mock_db_manager):
-        """Test handling of duplicate records."""
+        """Test handling of duplicate records with ON CONFLICT DO UPDATE."""
         # Mock API
         mock_api_instance = Mock()
         mock_api_client.return_value = mock_api_instance
 
         # Mock DB with duplicate tracking
         mock_cursor = Mock()
-        mock_cursor.fetchone.side_effect = [(100,), (101,)]  # Before and after counts
+        # With ON CONFLICT DO UPDATE, all 5 records will be processed (1 insert + 4 updates)
+        mock_cursor.fetchone.side_effect = [(100,), (105,)]  # Before and after counts
+        mock_cursor.rowcount = 5  # All records affected by upsert
 
         mock_conn = Mock()
         mock_conn.__enter__ = Mock(return_value=mock_conn)
@@ -375,8 +377,8 @@ class TestTradesIngester:
 
         ingester = TradesIngester()
 
-        # Insert batch with 5 records but only 1 new - using real trade record fields
-        # Primary key is (platform, position, trade_date) for trades tables
+        # Insert batch with 5 records - all will be processed via upsert
+        # Primary key is (position, login, platform, broker, trade_date) for closed trades
         from datetime import date
         batch_data = [
             {
@@ -385,17 +387,100 @@ class TestTradesIngester:
                 "trade_date": date(2024, 1, 15),
                 "broker": "5",
                 "login": "12345",
-                "profit": 100.0,
+                "profit": 100.0 + i,  # Different profit values
                 "lots": 1.0,
                 "ingestion_timestamp": "2024-01-15 10:00:00",
                 "source_api_endpoint": "/v2/trades/closed"
             } for i in range(5)
         ]
 
-        success = ingester._insert_trades_batch(batch_data, "test_table")
+        success = ingester._insert_trades_batch(batch_data, "prop_trading_model.raw_trades_closed")
 
         assert success
-        assert ingester.metrics.duplicate_records == 4  # 5 total - 1 new
+        # With upsert, all records are processed
+        assert ingester.metrics.new_records == 5  # All 5 contribute to count increase
+        assert ingester.metrics.duplicate_records == 0  # No duplicates with upsert
+
+    @patch("data_ingestion.ingest_trades.get_db_manager")
+    @patch("data_ingestion.ingest_trades.RiskAnalyticsAPIClient")
+    def test_upsert_behavior(self, mock_api_client, mock_db_manager):
+        """Test that ON CONFLICT DO UPDATE correctly updates existing records."""
+        # Mock API
+        mock_api_instance = Mock()
+        mock_api_client.return_value = mock_api_instance
+
+        # Track the SQL query executed
+        executed_query = None
+        executed_values = None
+        
+        def capture_query(query, values):
+            nonlocal executed_query, executed_values
+            executed_query = query
+            executed_values = values
+
+        mock_cursor = Mock()
+        mock_cursor.fetchone.side_effect = [(100,), (102,)]  # 2 new records
+        mock_cursor.executemany = Mock(side_effect=capture_query)
+
+        mock_conn = Mock()
+        mock_conn.__enter__ = Mock(return_value=mock_conn)
+        mock_conn.__exit__ = Mock(return_value=None)
+        mock_conn.cursor = Mock(return_value=mock_cursor)
+        mock_cursor.__enter__ = Mock(return_value=mock_cursor)
+        mock_cursor.__exit__ = Mock(return_value=None)
+
+        mock_db_instance = Mock()
+        mock_db_instance.model_db = Mock()
+        mock_db_instance.model_db.get_connection.return_value = mock_conn
+        mock_db_manager.return_value = mock_db_instance
+
+        ingester = TradesIngester()
+
+        # Insert batch with a record that would conflict
+        from datetime import date, datetime
+        batch_data = [
+            {
+                "trade_date": date(2024, 1, 15),
+                "broker": "TestBroker",
+                "manager": "TestManager",
+                "platform": "MT5",
+                "ticket": "12345",
+                "position": "POS123",
+                "login": "USER123",
+                "account_id": None,
+                "std_symbol": "EURUSD",
+                "side": "buy",
+                "lots": 1.5,
+                "contract_size": 100000,
+                "qty_in_base_ccy": 150000,
+                "volume_usd": 150000.0,
+                "stop_loss": 1.0950,
+                "take_profit": 1.1050,
+                "open_time": datetime(2024, 1, 15, 10, 0, 0),
+                "open_price": 1.1000,
+                "close_time": datetime(2024, 1, 15, 11, 0, 0),
+                "close_price": 1.1020,
+                "duration": 3600.0,
+                "profit": 200.0,
+                "commission": -5.0,
+                "fee": 0.0,
+                "swap": -1.0,
+                "comment": "Updated trade",
+                "ingestion_timestamp": datetime.now(),
+                "source_api_endpoint": "/v2/trades/closed"
+            }
+        ]
+
+        success = ingester._insert_trades_batch(batch_data, "prop_trading_model.raw_trades_closed")
+
+        assert success
+        # Verify the query contains ON CONFLICT DO UPDATE
+        assert "ON CONFLICT" in executed_query
+        assert "DO UPDATE SET" in executed_query
+        # Verify it updates the correct fields
+        assert "profit = EXCLUDED.profit" in executed_query
+        assert "comment = EXCLUDED.comment" in executed_query
+        assert "ingestion_timestamp = EXCLUDED.ingestion_timestamp" in executed_query
 
     @patch("data_ingestion.ingest_trades.get_db_manager")
     def test_batch_account_resolution(self, mock_db_manager):

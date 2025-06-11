@@ -263,7 +263,7 @@ def setup_logging(
 
 def get_logger(
     name: Optional[str] = None, **kwargs
-) -> Union[logging.Logger, BoundLogger]:
+) -> Union[logging.Logger, "structlog.stdlib.BoundLogger"]:
     """
     Get a logger instance with optional context binding.
 
@@ -354,7 +354,7 @@ def with_correlation_id(func):
     return wrapper
 
 
-def log_execution_time(logger: Optional[Union[logging.Logger, BoundLogger]] = None):
+def log_execution_time(logger: Optional[Union[logging.Logger, "structlog.stdlib.BoundLogger"]] = None):
     """
     Decorator to log function execution time.
 
@@ -450,7 +450,7 @@ class LoggingContext:
 
 # Performance metrics logging helpers
 def log_metrics(
-    logger: Union[logging.Logger, BoundLogger],
+    logger: Union[logging.Logger, "structlog.stdlib.BoundLogger"],
     operation: str,
     metrics: Dict[str, Any],
     **extra_context,

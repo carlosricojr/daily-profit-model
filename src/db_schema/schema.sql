@@ -35,7 +35,7 @@ CREATE TABLE raw_metrics_alltime (
     -- Account metadata
     plan_id VARCHAR(255),
     trader_id VARCHAR(255),
-    status INTEGER CHECK (status IN (0, 1, 2, 3)),
+    status INTEGER CHECK (status IN (1, 2, 3)),
     type INTEGER,
     phase INTEGER CHECK (phase IN (1, 2, 3, 4)),
     broker INTEGER,
@@ -68,7 +68,7 @@ CREATE TABLE raw_metrics_alltime (
     net_profit DECIMAL(18, 2),
     gross_profit DECIMAL(18, 2) CHECK (gross_profit >= 0),
     gross_loss DECIMAL(18, 2) CHECK (gross_loss <= 0),
-    gain_to_pain DECIMAL(10, 2) CHECK (gain_to_pain >= 0),
+    gain_to_pain DECIMAL(10, 2),
     profit_factor DECIMAL(10, 2) CHECK (profit_factor >= 0),
     success_rate DECIMAL(5, 2) CHECK (success_rate >= 0 AND success_rate <= 100),
     expectancy DECIMAL(18, 2),
@@ -263,7 +263,7 @@ CREATE TABLE raw_metrics_daily (
     -- Account metadata
     plan_id VARCHAR(255),
     trader_id VARCHAR(255),
-    status INTEGER,
+    status INTEGER CHECK (status IN (1, 2, 3)),
     type INTEGER,
     phase INTEGER,
     broker INTEGER,
@@ -294,7 +294,7 @@ CREATE TABLE raw_metrics_daily (
     net_profit DECIMAL(18, 2),
     gross_profit DECIMAL(18, 2) CHECK (gross_profit >= 0),
     gross_loss DECIMAL(18, 2) CHECK (gross_loss <= 0),
-    gain_to_pain DECIMAL(10, 2) CHECK (gain_to_pain >= 0),
+    gain_to_pain DECIMAL(10, 2),
     profit_factor DECIMAL(10, 2) CHECK (profit_factor >= 0),
     success_rate DECIMAL(5, 2) CHECK (success_rate >= 0 AND success_rate <= 100),
     expectancy DECIMAL(18, 2),
@@ -458,7 +458,7 @@ CREATE TABLE raw_metrics_daily (
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500),
     
-    UNIQUE(account_id, date)
+    PRIMARY KEY (account_id, date)
 ) PARTITION BY RANGE (date);
 
 -- Create partitions for raw_metrics_daily (last 3 years + future)
@@ -504,7 +504,7 @@ CREATE TABLE raw_metrics_hourly (
     -- Account metadata
     plan_id VARCHAR(255),
     trader_id VARCHAR(255),
-    status INTEGER,
+    status INTEGER CHECK (status IN (1, 2, 3)),
     type INTEGER,
     phase INTEGER,
     broker INTEGER,
@@ -535,7 +535,7 @@ CREATE TABLE raw_metrics_hourly (
     net_profit DECIMAL(18, 2),
     gross_profit DECIMAL(18, 2) CHECK (gross_profit >= 0),
     gross_loss DECIMAL(18, 2) CHECK (gross_loss <= 0),
-    gain_to_pain DECIMAL(10, 2) CHECK (gain_to_pain >= 0),
+    gain_to_pain DECIMAL(10, 2),
     profit_factor DECIMAL(10, 2) CHECK (profit_factor >= 0),
     success_rate DECIMAL(5, 2) CHECK (success_rate >= 0 AND success_rate <= 100),
     expectancy DECIMAL(18, 2),
@@ -692,7 +692,6 @@ CREATE TABLE raw_metrics_hourly (
     -- System fields
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500),
-    UNIQUE(account_id, date, hour),
     PRIMARY KEY (account_id, date, hour)
 );
 
@@ -733,6 +732,7 @@ CREATE TABLE raw_trades_closed (
     comment VARCHAR(255),
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500),
+    UNIQUE(position, login, platform, broker, trade_date),
     PRIMARY KEY (platform, position, trade_date)
 ) PARTITION BY RANGE (trade_date);
 
@@ -799,6 +799,7 @@ CREATE TABLE raw_trades_open (
     comment VARCHAR(255),
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500),
+    UNIQUE(position, login, platform, broker, trade_date),
     PRIMARY KEY (platform, position, trade_date)
 ) PARTITION BY RANGE (trade_date);
 
@@ -808,13 +809,12 @@ COMMENT ON COLUMN raw_trades_open.account_id IS 'Account ID - may be temporarily
 -- Indexes for raw_trades_open
 CREATE INDEX idx_raw_trades_open_account_id ON raw_trades_open(account_id, trade_date DESC);
 CREATE INDEX idx_raw_trades_open_symbol ON raw_trades_open(std_symbol, trade_date DESC) WHERE std_symbol IS NOT NULL;
-CREATE INDEX idx_raw_trades_open_profit ON raw_trades_open(profit DESC, trade_date DESC);
+CREATE INDEX idx_raw_trades_open_profit ON raw_trades_open(unrealized_profit DESC, trade_date DESC);
 CREATE INDEX idx_raw_trades_open_login_platform_broker ON raw_trades_open(login, platform, broker);
 
 -- Raw plans data
 CREATE TABLE raw_plans_data (
-    id SERIAL PRIMARY KEY,
-    plan_id VARCHAR(255) NOT NULL,
+    plan_id VARCHAR(255) NOT NULL PRIMARY KEY,
     plan_name VARCHAR(255) NOT NULL,
     plan_type VARCHAR(100),
     starting_balance DECIMAL(18, 2) CHECK (starting_balance > 0),
@@ -836,8 +836,7 @@ CREATE TABLE raw_plans_data (
     created_at TIMESTAMP,
     updated_at TIMESTAMP,
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    source_api_endpoint VARCHAR(500),
-    UNIQUE(plan_id, ingestion_timestamp)
+    source_api_endpoint VARCHAR(500)
 );
 
 -- Indexes for raw_plans_data
@@ -858,7 +857,7 @@ CREATE TABLE raw_regimes_daily (
     summary JSONB,
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500),
-    UNIQUE(date, ingestion_timestamp)
+    UNIQUE(date)
 );
 
 -- Indexes for raw_regimes_daily
@@ -871,14 +870,19 @@ CREATE INDEX idx_raw_regimes_summary ON raw_regimes_daily USING gin(summary);
 
 -- Daily account snapshots for time-series analysis
 CREATE TABLE stg_accounts_daily_snapshots (
-    id SERIAL PRIMARY KEY,
     account_id VARCHAR(255) NOT NULL,
     snapshot_date DATE NOT NULL,
+    
+    -- Account metadata
     login VARCHAR(255) NOT NULL,
-    trader_id VARCHAR(255),
     plan_id VARCHAR(255),
-    phase VARCHAR(50),
-    status VARCHAR(50),
+    trader_id VARCHAR(255),
+    status INTEGER CHECK (status IN (1, 2, 3)),
+    type INTEGER,
+    phase INTEGER CHECK (phase IN (1, 2, 3, 4)),
+    broker INTEGER,
+    platform INTEGER,
+    country VARCHAR(2),
     starting_balance DECIMAL(18, 2),
     balance DECIMAL(18, 2),
     equity DECIMAL(18, 2),
@@ -900,13 +904,13 @@ CREATE TABLE stg_accounts_daily_snapshots (
     days_since_last_trade INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(account_id, snapshot_date)
+    PRIMARY KEY (account_id, snapshot_date)
 );
 
 -- Indexes for staging table
 CREATE INDEX idx_stg_accounts_daily_account_date ON stg_accounts_daily_snapshots(account_id, snapshot_date DESC);
 CREATE INDEX idx_stg_accounts_daily_date ON stg_accounts_daily_snapshots(snapshot_date DESC);
-CREATE INDEX idx_stg_accounts_daily_status ON stg_accounts_daily_snapshots(status) WHERE status = 'Active';
+CREATE INDEX idx_stg_accounts_daily_status ON stg_accounts_daily_snapshots(status) WHERE status = 1;
 
 -- ========================================
 -- Feature Store (ML Layer)
@@ -1239,7 +1243,7 @@ SELECT
         THEN ((p.profit_target - (a.current_balance - a.starting_balance)) / p.profit_target * 100)
         ELSE 0 
     END as distance_to_target_pct,
-    a.updated_at as last_updated,
+    a.updated_date as last_updated,
     CURRENT_TIMESTAMP as mv_refreshed_at
 FROM (
     SELECT DISTINCT ON (account_id) *
@@ -1287,7 +1291,7 @@ WITH DATA;
 
 -- Create indexes for mv_account_performance_summary
 CREATE UNIQUE INDEX idx_mv_account_performance_account_id ON mv_account_performance_summary(account_id);
-CREATE INDEX idx_mv_account_performance_status ON mv_account_performance_summary(status) WHERE status = 'Active';
+CREATE INDEX idx_mv_account_performance_status ON mv_account_performance_summary(status) WHERE status = 1;
 CREATE INDEX idx_mv_account_performance_phase ON mv_account_performance_summary(phase);
 CREATE INDEX idx_mv_account_performance_profit ON mv_account_performance_summary(lifetime_profit DESC);
 CREATE INDEX idx_mv_account_performance_recent_profit ON mv_account_performance_summary(profit_last_30d DESC);

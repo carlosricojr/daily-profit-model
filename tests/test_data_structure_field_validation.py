@@ -296,7 +296,7 @@ class TestDataStructureFieldValidation:
             
             # Remove logging and other infrastructure fields
             infrastructure_fields = {
-                'logger', 'info', 'error', 'warning', 'debug', 'exception',
+                'logger', 'has_data', 'info', 'error', 'warning', 'debug', 'exception',
                 'name', 'level', 'handlers', 'filters', 'disabled',
                 'base_url', 'headers', 'timeout', 'verify', 'auth',
                 'status_code', 'json', 'text', 'content', 'raise_for_status',
@@ -323,7 +323,8 @@ class TestDataStructureFieldValidation:
                 'table_mapping', 'field_mapping', 'column_mapping',
                 'new_records', 'duplicate_records', 'invalid_records', 'total_records',
                 'api_calls', 'api_errors', 'db_errors', 'validation_errors',
-                'processing_time', 'records_per_second', 'seen_records',
+                'processing_time', 'records_per_second', 'seen_records', "add_parser",
+                "add_subparsers", "execute_query", "ingest_metrics_for_training", "strategy", "no_hourly", "sleep",
                 # Database operation fields
                 'account_id', 'metric_id', 'plan_id', 'regime_id',
                 'record_id', 'row_id', 'batch_data', 'batch_records',
@@ -382,7 +383,7 @@ class TestDataStructureFieldValidation:
                 'csv_dir', 'source_endpoint', 'source_file',
                 'get_metrics_summary', 'md5', 'hexdigest',
                 # Specific computed fields used internally
-                'duration_seconds', 'accountids', 'checkpoint_managers',
+                'duration_seconds', 'accountids', 'account_ids', 'checkpoint_managers',
                 'config', 'updatedDate',
                 # DataFrame operations
                 'DataFrame', 'read_csv', 'to_dict', 'iloc', 'columns',

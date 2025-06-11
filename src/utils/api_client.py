@@ -308,7 +308,7 @@ class RiskAnalyticsAPIClient:
 
         self.base_url = base_url or os.getenv(
             "RISK_API_BASE_URL",
-            "https://easton.apis.arizet.io/risk-analytics/tft/external/"
+            "https://easton.apis.arizet.io/risk-analytics/tft/external"
         )
         # Ensure base URL ends with /
         if not self.base_url.endswith('/'):
@@ -363,7 +363,7 @@ class RiskAnalyticsAPIClient:
         method: str = "GET",
         params: Optional[Dict[str, Any]] = None,
         data: Optional[Dict[str, Any]] = None,
-        timeout: int = 30,
+        timeout: int = 120,
     ) -> Dict[str, Any]:
         """
         Make an API request with connection pooling, circuit breaker, and enhanced error handling.
@@ -396,7 +396,8 @@ class RiskAnalyticsAPIClient:
         log_params = {k: v for k, v in params.items() if k != "apiKey"}
         logger.info(f"API Request: {method} {url}", extra={
             "params": log_params,
-            "has_data": data is not None,
+            "has_request_body": data is not None,
+            "full_url": f"{url}?{'&'.join([f'{k}={v}' for k, v in log_params.items()])}",
             "timeout": timeout
         })
 
@@ -434,7 +435,8 @@ class RiskAnalyticsAPIClient:
                     "url": url,
                     "status_code": response.status_code,
                     "response_time": response_time,
-                    "response_size": len(response.text) if response.text else 0
+                    "response_size": len(response.text) if response.text else 0,
+                    "has_response_data": bool(response.text)
                 }
             )
 
@@ -652,7 +654,7 @@ class RiskAnalyticsAPIClient:
         page = 0
         total_fetched = 0
         total_expected = None
-
+        
         while max_pages is None or page < max_pages:
             logger.info(
                 f"Fetching page {page + 1}, skip={params['skip']}, limit={limit}"
@@ -679,7 +681,12 @@ class RiskAnalyticsAPIClient:
                 result_count = len(results)
                 total_fetched += result_count
                 
-                logger.info(f"Page {page + 1}: Retrieved {result_count} records (total so far: {total_fetched})")
+                logger.info(f"Page {page + 1}: Retrieved {result_count} records (total so far: {total_fetched})", extra={
+                    "page_number": page + 1,
+                    "records_this_page": result_count,
+                    "total_records_fetched": total_fetched,
+                    "has_data": result_count > 0
+                })
 
                 if not results:
                     logger.info("No results returned, stopping pagination")
@@ -775,9 +782,10 @@ class RiskAnalyticsAPIClient:
         self,
         metric_type: str,
         logins: Optional[List[str]] = None,
-        accountids: Optional[List[str]] = None,
+        account_ids: Optional[List[str]] = None,
         dates: Optional[List[str]] = None,
         hours: Optional[List[int]] = None,
+        limit: Optional[int] = None,
         **kwargs,
     ) -> Iterator[List[Dict[str, Any]]]:
         """
@@ -786,7 +794,7 @@ class RiskAnalyticsAPIClient:
         Args:
             metric_type: Type of metrics ('alltime', 'daily', 'hourly')
             logins: List of login IDs to filter
-            accountids: List of account IDs to filter
+            account_ids: List of account IDs to filter
             dates: List of dates in YYYYMMDD format
             hours: List of hours (0-23) for hourly metrics
             **kwargs: Additional parameters
@@ -799,18 +807,19 @@ class RiskAnalyticsAPIClient:
 
         if logins:
             params["logins"] = ",".join(logins)
-        if accountids:
-            params["accountids"] = ",".join(accountids)
+        if account_ids:
+            params["accountIds"] = ",".join(account_ids)
         if dates:
             params["dates"] = ",".join(dates)
         if hours and metric_type == "hourly":
             params["hours"] = ",".join(map(str, hours))
         params.update(kwargs)
 
-        # Max limit for metrics endpoints is 1000
+        # Max limit for metrics endpoints is 1000, but can be overridden
         # Metrics endpoints support include-total
+        api_limit = limit if limit is not None else 1000
         yield from self.paginate(
-            endpoint, params=params, limit=1000, include_total=True
+            endpoint, params=params, limit=api_limit, include_total=True
         )
 
     def get_trades(

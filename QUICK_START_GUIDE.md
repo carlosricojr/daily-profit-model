@@ -100,9 +100,9 @@ else
     uv run --env-file .env -- python -m src.data_ingestion.ingest_accounts
 fi
 
-# 2. Ingest daily metrics only
-uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics daily \
-    --start-date $START_DATE --end-date $END_DATE
+# 2. Ingest metrics optimized for training (daily first, then targeted alltime)
+uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics training \
+    $START_DATE --end-date $END_DATE
 
 # 3. Create staging snapshots
 uv run --env-file .env -- python -m src.preprocessing.create_staging_snapshots \
@@ -274,9 +274,9 @@ else
 fi
 check_status "Account ingestion"
 
-echo -e "\n3. Ingesting daily metrics..."
-uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics daily \
-    --start-date $START_DATE --end-date $END_DATE
+echo -e "\n3. Ingesting metrics optimized for training..."
+uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics training \
+    $START_DATE --end-date $END_DATE
 check_status "Metrics ingestion"
 
 echo -e "\n4. Creating staging snapshots..."
@@ -357,7 +357,7 @@ uv run --env-file .env -- python -m src.feature_engineering.engineer_features \
 Using active login discovery for 1 week of data:
 - **Login Discovery**: 5-10 seconds
 - **Account Ingestion**: 10-30 seconds (vs. 5-10 minutes for all accounts)
-- **Metrics Ingestion**: 1-2 minutes
+- **Optimized Metrics Ingestion**: 1-2 minutes (daily + targeted alltime vs. all 870K records)
 - **Preprocessing**: < 1 minute
 - **Feature Engineering**: 1-3 minutes (optimized)
 - **Model Training**: < 1 minute
@@ -370,9 +370,10 @@ Using active login discovery for 1 week of data:
 
 ### Efficiency Gains
 - **Account ingestion**: 10-20x faster (30 seconds vs. 10 minutes)
+- **Metrics ingestion**: 50-100x faster (targeted alltime vs. all 870K records)
 - **API calls**: Reduced from ~1000s to ~10s of requests
-- **Data transfer**: Only fetch accounts that actually have data
-- **Storage**: Avoid storing millions of inactive accounts
+- **Data transfer**: Only fetch accounts that actually have data in the target period
+- **Storage**: Avoid storing millions of inactive accounts and irrelevant alltime metrics
 
 ## 11. Next Steps
 
@@ -400,6 +401,15 @@ uv run --env-file .env -- python -m src.data_ingestion.discover_active_logins \
 # Ingest accounts for specific logins only (much faster than all ~1M accounts)
 uv run --env-file .env -- python -m src.data_ingestion.ingest_accounts \
     --logins 12345,67890,11111
+
+# Use optimized metrics ingestion (recommended for training/testing)
+uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics training \
+    2024-01-01 --end-date 2024-01-07
+
+# Or use individual metric types if needed
+uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics standard daily \
+    --start-date 2024-01-01 --end-date 2024-01-07
+uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics standard alltime
 
 # Validate data quality
 uv run --env-file .env -- python -m src.preprocessing.data_validator \

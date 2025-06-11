@@ -159,8 +159,12 @@ Each component can also be run independently:
 # Ingest accounts
 uv run --env-file .env -- python -m src.data_ingestion.ingest_accounts
 
-# Ingest daily metrics
-uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics daily --start-date 2024-01-01
+# Optimized metrics ingestion (recommended - daily first, then targeted alltime)
+uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics training 2025-06-05 --end-date 2025-06-10
+
+# Standard metrics ingestion (individual types)
+uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics standard daily --start-date 2024-01-01
+uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics standard alltime
 
 # Ingest closed trades (with batching for 81M records)
 uv run --env-file .env -- python -m src.data_ingestion.ingest_trades closed --batch-days 7
