@@ -17,42 +17,34 @@ dependencies = [
     "scikit-learn>=1.6.1",
     "scipy>=1.10.0",
     "joblib>=1.2.0",
-    
     # ML model optimization and interpretation
     "optuna>=4.3.0",
     "shap>=0.47.2",
-    
     # Database and data storage
     "psycopg2-binary>=2.9.10",
-    "redis>=4.5.0",
     "sqlalchemy>=1.4.0",
-    "alembic>=1.8.0",
-    
     # API and configuration
     "requests>=2.32.3",
-    "python-dotenv>=1.1.0",
     "pyyaml>=6.0",
-    
     # Data validation and quality
     "great-expectations>=0.15.0",
     "pydantic>=1.10.0",
     "pyod>=1.0.0",
-    
     # Monitoring and observability
     "prometheus-client>=0.15.0",
     "structlog>=22.3.0",
     "opentelemetry-api>=1.15.0",
     "opentelemetry-sdk>=1.15.0",
-    
     # Performance monitoring and utilities
     "psutil>=5.9.0",
     "tqdm>=4.67.1",
-    
     # Dashboard and visualization (production)
     "plotly>=5.12.0",
     "dash>=2.8.0",
     "dash-bootstrap-components>=1.2.0",
-    "matplotlib>=3.6.0",  # Used for SHAP plots, confidence intervals, and lineage graphs
+    "matplotlib>=3.6.0", # Used for SHAP plots, confidence intervals, and lineage graphs
+    "apache-airflow>=3.0.2",
+    "apache-airflow-providers-postgres>=6.2.0",
 ]
 
 [project.urls]

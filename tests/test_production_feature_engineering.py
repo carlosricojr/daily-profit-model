@@ -24,7 +24,7 @@ import pandas as pd
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.feature_engineering.engineer_features import (
+from src.feature_engineering.feature_engineering import (
     LookaheadBiasValidator,
     FeatureQualityMonitor,
     IntegratedProductionFeatureEngineer,
@@ -387,7 +387,7 @@ class TestIntegratedProductionFeatureEngineer:
         from unittest.mock import patch, Mock
 
         with patch(
-            "src.feature_engineering.engineer_features.get_db_manager"
+            "src.feature_engineering.feature_engineering.get_db_manager"
         ) as mock_get_db:
             # Mock database responses
             mock_db = Mock()
@@ -445,7 +445,7 @@ class TestIntegratedProductionFeatureEngineer:
         from unittest.mock import patch, Mock
 
         with patch(
-            "src.feature_engineering.engineer_features.get_db_manager"
+            "src.feature_engineering.feature_engineering.get_db_manager"
         ) as mock_get_db:
             # Mock database responses
             mock_db = Mock()
@@ -496,7 +496,7 @@ class TestProductionReadiness:
         from unittest.mock import patch, Mock
 
         with patch(
-            "src.feature_engineering.engineer_features.get_db_manager"
+            "src.feature_engineering.feature_engineering.get_db_manager"
         ) as mock_get_db:
             # Mock database responses
             mock_db = Mock()
@@ -532,7 +532,7 @@ class TestProductionReadiness:
         from unittest.mock import patch, Mock
 
         with patch(
-            "src.feature_engineering.engineer_features.get_db_manager"
+            "src.feature_engineering.feature_engineering.get_db_manager"
         ) as mock_get_db:
             # Mock database responses
             mock_db = Mock()
@@ -583,13 +583,13 @@ class TestProductionReadiness:
 
         log_capture = io.StringIO()
         handler = logging.StreamHandler(log_capture)
-        logger = logging.getLogger("src.feature_engineering.engineer_features")
+        logger = logging.getLogger("src.feature_engineering.feature_engineering")
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
 
         try:
             with patch(
-                "src.feature_engineering.engineer_features.get_db_manager"
+                "src.feature_engineering.feature_engineering.get_db_manager"
             ) as mock_get_db:
                 # Mock database responses
                 mock_db = Mock()

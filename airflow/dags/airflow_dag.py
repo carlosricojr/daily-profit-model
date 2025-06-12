@@ -6,50 +6,53 @@ Provides workflow orchestration with advanced monitoring and retry capabilities.
 from datetime import datetime, timedelta
 from typing import Dict, Any
 import logging
+import os
 
 from airflow import DAG
-from airflow.operators.python_operator import PythonOperator
-from airflow.operators.bash_operator import BashOperator
-from airflow.operators.dummy_operator import DummyOperator
+from airflow.providers.standard.operators.python import PythonOperator
+from airflow.providers.standard.operators.bash import BashOperator
+from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.models import Variable
-from airflow.hooks.postgres_hook import PostgresHook
-from airflow.utils.decorators import apply_defaults
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.utils.email import send_email
 from airflow.utils.trigger_rule import TriggerRule
+from airflow.timetables.trigger import CronTriggerTimetable
 
 logger = logging.getLogger(__name__)
 
 # DAG Configuration
 DAG_ID = "daily_profit_model_pipeline"
 DEFAULT_ARGS = {
-    "owner": "data-team",
+    "owner": "Carlos",
     "depends_on_past": False,
-    "start_date": datetime(2024, 1, 1),
+    "start_date": datetime(2024, 4, 15),
     "email_on_failure": True,
     "email_on_retry": False,
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
-    "email": ["data-alerts@company.com"],
-    "sla": timedelta(hours=4),  # Pipeline should complete within 4 hours
+    "email": ["carlos@eastontech.net"],
+    # SLA removed in Airflow 3.0 - will be replaced in 3.1+
+    "catchup": False,
 }
 
-# Pipeline configuration from Airflow Variables
-PIPELINE_CONFIG = {
-    "environment": Variable.get("PIPELINE_ENV", default_var="development"),
-    "data_start_date": Variable.get("DATA_START_DATE", default_var="2024-01-01"),
-    "alert_email": Variable.get("ALERT_EMAIL", default_var="data-alerts@company.com"),
-    "max_parallel_tasks": int(Variable.get("MAX_PARALLEL_TASKS", default_var="3")),
-    "enable_data_quality_checks": Variable.get(
-        "ENABLE_DQ_CHECKS", default_var="true"
-    ).lower()
-    == "true",
-}
+# Pipeline configuration - moved Variable access to runtime to avoid top-level DB access
+def get_pipeline_config():
+    """Get pipeline configuration from Airflow Variables at runtime."""
+    return {
+        "environment": Variable.get("PIPELINE_ENV", default_var="development"),
+        "data_start_date": Variable.get("DATA_START_DATE", default_var="2024-04-15"),
+        "alert_email": Variable.get("ALERT_EMAIL", default_var="carlos@eastontech.net"),
+        "max_parallel_tasks": int(Variable.get("MAX_PARALLEL_TASKS", default_var="3")),
+        "enable_data_quality_checks": Variable.get(
+            "ENABLE_DQ_CHECKS", default_var="true"
+        ).lower()
+        == "true",
+    }
 
 
 class PipelineOperator(PythonOperator):
     """Custom operator for pipeline stages with enhanced monitoring."""
 
-    @apply_defaults
     def __init__(
         self,
         stage_name: str,
@@ -61,6 +64,8 @@ class PipelineOperator(PythonOperator):
         self.stage_name = stage_name
         self.module_path = module_path
         self.stage_args = stage_args or []
+        # Set python_callable to our execute method
+        kwargs['python_callable'] = self.execute
         super().__init__(*args, **kwargs)
 
     def execute(self, context: Dict[str, Any]) -> Any:
@@ -69,8 +74,14 @@ class PipelineOperator(PythonOperator):
         import sys
         from pathlib import Path
 
-        execution_date = context["execution_date"]
-        dag_run_id = context["dag_run"].run_id
+        # More explicit context access for Airflow 3.0
+        execution_date = context.get("execution_date") or context.get("logical_date")
+        dag_run = context.get("dag_run")
+        
+        if not execution_date or not dag_run:
+            raise ValueError("Missing required context variables: execution_date or dag_run")
+            
+        dag_run_id = dag_run.run_id
 
         logger.info(f"Starting stage {self.stage_name} for execution {dag_run_id}")
 
@@ -144,60 +155,93 @@ def check_data_freshness(**context) -> bool:
 
 def check_model_availability(**context) -> bool:
     """Check if a trained model is available for predictions."""
-    hook = PostgresHook(postgres_conn_id="postgres_model_db")
+    try:
+        hook = PostgresHook(postgres_conn_id="postgres_model_db")
 
-    query = """
-    SELECT model_version, model_file_path, is_active
-    FROM prop_trading_model.model_registry
-    WHERE is_active = true
-    ORDER BY created_at DESC
-    LIMIT 1
-    """
+        query = """
+        SELECT model_version, model_path, is_active, created_at
+        FROM prop_trading_model.model_registry
+        WHERE is_active = true
+        ORDER BY created_at DESC
+        LIMIT 1
+        """
 
-    result = hook.get_first(query)
-    if not result:
-        logger.warning("No active model found in registry")
+        result = hook.get_first(query)
+        if not result:
+            logger.warning("No active model found in registry")
+            return False
+
+        model_version, model_path, is_active, created_at = result
+        
+        # Check if model is too old (more than 30 days)
+        if (datetime.now() - created_at).days > 30:
+            logger.warning(f"Active model is too old (created {created_at})")
+            return False
+            
+        # Verify model file exists
+        if not os.path.exists(model_path):
+            logger.error(f"Model file not found at path: {model_path}")
+            return False
+
+        logger.info(f"Active model found: {model_version} at {model_path} (created {created_at})")
+        return is_active
+        
+    except Exception as e:
+        logger.error(f"Error checking model availability: {str(e)}")
         return False
-
-    model_version, model_path, is_active = result
-    logger.info(f"Active model found: {model_version} at {model_path}")
-    return True
 
 
 def send_pipeline_alert(
     context: Dict[str, Any], message: str, alert_type: str = "error"
 ):
     """Send pipeline alerts via email."""
-    subject = f"[{alert_type.upper()}] Daily Profit Model Pipeline - {context['task_instance'].task_id}"
+    # More explicit context access for Airflow 3.0
+    task_instance = context.get("task_instance")
+    dag = context.get("dag")
+    dag_run = context.get("dag_run")
+    execution_date = context.get("execution_date") or context.get("logical_date")
+    
+    if not all([task_instance, dag, dag_run]):
+        logger.error("Missing required context variables for alert")
+        return
+    
+    subject = f"[{alert_type.upper()}] Daily Profit Model Pipeline - {task_instance.task_id}"
 
     html_content = f"""
     <h3>Pipeline Alert</h3>
-    <p><strong>DAG:</strong> {context["dag"].dag_id}</p>
-    <p><strong>Task:</strong> {context["task_instance"].task_id}</p>
-    <p><strong>Execution Date:</strong> {context["execution_date"]}</p>
-    <p><strong>Run ID:</strong> {context["dag_run"].run_id}</p>
+    <p><strong>DAG:</strong> {dag.dag_id}</p>
+    <p><strong>Task:</strong> {task_instance.task_id}</p>
+    <p><strong>Execution Date:</strong> {execution_date}</p>
+    <p><strong>Run ID:</strong> {dag_run.run_id}</p>
     <p><strong>Alert Type:</strong> {alert_type}</p>
     
     <h4>Message:</h4>
     <p>{message}</p>
     
     <h4>Context:</h4>
-    <p>Log URL: {context["task_instance"].log_url}</p>
+    <p>Log URL: {task_instance.log_url}</p>
     """
 
+    config = get_pipeline_config()
     send_email(
-        to=[PIPELINE_CONFIG["alert_email"]], subject=subject, html_content=html_content
+        to=[config["alert_email"]], subject=subject, html_content=html_content
     )
 
 
 def validate_data_quality(**context) -> bool:
     """Perform data quality checks on ingested data."""
-    if not PIPELINE_CONFIG["enable_data_quality_checks"]:
+    config = get_pipeline_config()
+    if not config["enable_data_quality_checks"]:
         logger.info("Data quality checks disabled")
         return True
 
     hook = PostgresHook(postgres_conn_id="postgres_model_db")
-    execution_date = context["execution_date"]
+    # More explicit context access for Airflow 3.0
+    execution_date = context.get("execution_date") or context.get("logical_date")
+    
+    if not execution_date:
+        logger.error("Missing execution_date in context")
+        return False
 
     checks = [
         {
@@ -300,22 +344,25 @@ dag = DAG(
     DAG_ID,
     default_args=DEFAULT_ARGS,
     description="Daily profit model pipeline with enhanced orchestration",
-    schedule_interval="0 6 * * *",  # Run daily at 6 AM
+    schedule=CronTriggerTimetable(
+        "0 1 * * *",
+        timezone="America/New_York"
+    ),
     catchup=False,
     max_active_runs=1,
     tags=["machine_learning", "trading", "daily"],
 )
 
 # Start and end operators
-start_pipeline = DummyOperator(
+start_pipeline = EmptyOperator(
     task_id="start_pipeline",
     dag=dag,
 )
 
-end_pipeline = DummyOperator(
+end_pipeline = EmptyOperator(
     task_id="end_pipeline",
     dag=dag,
-    trigger_rule=TriggerRule.NONE_FAILED_OR_SKIPPED,
+    trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
 )
 
 # Pre-flight checks
@@ -345,18 +392,9 @@ create_schema = BashOperator(
 )
 
 # Data ingestion with parallel sub-tasks
-ingestion_start = DummyOperator(
+ingestion_start = EmptyOperator(
     task_id="ingestion_start",
     dag=dag,
-)
-
-ingest_accounts = PipelineOperator(
-    task_id="ingest_accounts",
-    stage_name="ingest_accounts",
-    module_path="data_ingestion.ingest_accounts",
-    stage_args=["--log-level", "INFO"],
-    dag=dag,
-    pool="ingestion_pool",
 )
 
 ingest_plans = PipelineOperator(
@@ -387,7 +425,7 @@ ingest_regimes = PipelineOperator(
 ingest_metrics_alltime = PipelineOperator(
     task_id="ingest_metrics_alltime",
     stage_name="ingest_metrics_alltime",
-    module_path="data_ingestion.ingest_metrics_v2",
+    module_path="data_ingestion.ingest_metrics_intelligent",
     stage_args=["alltime", "--log-level", "INFO"],
     dag=dag,
     pool="ingestion_pool",
@@ -396,7 +434,7 @@ ingest_metrics_alltime = PipelineOperator(
 ingest_metrics_daily = PipelineOperator(
     task_id="ingest_metrics_daily",
     stage_name="ingest_metrics_daily",
-    module_path="data_ingestion.ingest_metrics_v2",
+    module_path="data_ingestion.ingest_metrics_intelligent",
     stage_args=[
         "daily",
         "--start-date",
@@ -410,10 +448,25 @@ ingest_metrics_daily = PipelineOperator(
     pool="ingestion_pool",
 )
 
+ingest_metrics_hourly = PipelineOperator(
+    task_id="ingest_metrics_hourly",
+    stage_name="ingest_metrics_hourly",
+    module_path="data_ingestion.ingest_metrics_intelligent",
+    stage_args=[
+        "hourly",
+        "--start-date",
+        '{{ (execution_date - macros.timedelta(days=1)).strftime("%Y-%m-%d") }}',
+        "--end-date",
+        '{{ execution_date.strftime("%Y-%m-%d") }}',
+        "--log-level", "INFO"],
+    dag=dag,
+    pool="ingestion_pool",
+)
+
 ingest_trades_open = PipelineOperator(
     task_id="ingest_trades_open",
     stage_name="ingest_trades_open",
-    module_path="data_ingestion.ingest_trades",
+    module_path="data_ingestion.ingest_trades_intelligent",
     stage_args=[
         "open",
         "--end-date",
@@ -428,7 +481,7 @@ ingest_trades_open = PipelineOperator(
 ingest_trades_closed = PipelineOperator(
     task_id="ingest_trades_closed",
     stage_name="ingest_trades_closed",
-    module_path="data_ingestion.ingest_trades",
+    module_path="data_ingestion.ingest_trades_intelligent",
     stage_args=[
         "closed",
         "--start-date",
@@ -444,7 +497,7 @@ ingest_trades_closed = PipelineOperator(
     pool="ingestion_pool",
 )
 
-ingestion_complete = DummyOperator(
+ingestion_complete = EmptyOperator(
     task_id="ingestion_complete",
     dag=dag,
     trigger_rule=TriggerRule.ALL_SUCCESS,
@@ -478,7 +531,7 @@ preprocessing = PipelineOperator(
 feature_engineering = PipelineOperator(
     task_id="feature_engineering",
     stage_name="feature_engineering",
-    module_path="feature_engineering.engineer_features_v2",
+    module_path="feature_engineering.feature_engineering",
     stage_args=[
         "--start-date",
         '{{ (execution_date - macros.timedelta(days=2)).strftime("%Y-%m-%d") }}',
@@ -550,11 +603,15 @@ cleanup_old_data_task = PythonOperator(
 )
 
 # Success notification
+def send_success_notification(**context):
+    """Send success notification."""
+    send_pipeline_alert(
+        context, "Daily profit model pipeline completed successfully", "success"
+    )
+
 success_notification = PythonOperator(
     task_id="success_notification",
-    python_callable=lambda **context: send_pipeline_alert(
-        context, "Daily profit model pipeline completed successfully", "success"
-    ),
+    python_callable=send_success_notification,
     dag=dag,
     trigger_rule=TriggerRule.ALL_SUCCESS,
 )
@@ -567,21 +624,21 @@ start_pipeline >> [health_check, data_freshness_check]
 create_schema >> ingestion_start
 
 ingestion_start >> [
-    ingest_accounts,
     ingest_plans,
     ingest_regimes,
     ingest_metrics_alltime,
     ingest_metrics_daily,
+    ingest_metrics_hourly,
     ingest_trades_open,
     ingest_trades_closed,
 ]
 
 [
-    ingest_accounts,
     ingest_plans,
     ingest_regimes,
     ingest_metrics_alltime,
     ingest_metrics_daily,
+    ingest_metrics_hourly,
     ingest_trades_open,
     ingest_trades_closed,
 ] >> ingestion_complete

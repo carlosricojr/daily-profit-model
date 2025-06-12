@@ -70,7 +70,7 @@ class IntelligentMetricsIngester(BaseIngester):
             'max_retries': 3,
             'timeout': 30,
             'account_batch_size': 50,  # For alltime metrics
-            'hourly_batch_size': 10,   # For hourly metrics (more data per account)
+            'hourly_batch_size': 25,   # For hourly metrics (more data per account)
         })()
 
         # Initialize API client
@@ -827,7 +827,7 @@ class IntelligentMetricsIngester(BaseIngester):
         
         # Create batches
         api_batches = []
-        max_accounts_per_batch = 25  # API limit
+        max_accounts_per_batch = self.config.hourly_batch_size
         
         for date_val, account_ids in sorted(date_accounts.items()):
             account_list = sorted(list(account_ids))  # Sort for consistency

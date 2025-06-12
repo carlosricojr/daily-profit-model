@@ -493,7 +493,7 @@ CREATE INDEX idx_raw_metrics_daily_date ON raw_metrics_daily(date DESC);
 CREATE INDEX idx_raw_metrics_daily_login ON raw_metrics_daily(login);
 CREATE INDEX idx_raw_metrics_daily_profit ON raw_metrics_daily(date DESC, net_profit DESC) WHERE net_profit IS NOT NULL;
 
--- Raw metrics hourly
+-- Raw metrics hourly - PARTITIONED BY RANGE (date) for performance
 CREATE TABLE raw_metrics_hourly (
     date DATE NOT NULL,
     datetime TIMESTAMP NOT NULL,
@@ -693,7 +693,33 @@ CREATE TABLE raw_metrics_hourly (
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500),
     PRIMARY KEY (account_id, date, hour)
-);
+) PARTITION BY RANGE (date);
+
+-- Create partitions for raw_metrics_hourly (last 3 years + future)
+DO $$
+DECLARE
+    start_date date := '2022-01-01';
+    partition_date date;
+    partition_name text;
+BEGIN
+    FOR partition_date IN 
+        SELECT generate_series(
+            start_date,
+            CURRENT_DATE + interval '3 months',
+            interval '1 month'
+        )::date
+    LOOP
+        partition_name := 'raw_metrics_hourly_' || to_char(partition_date, 'YYYY_MM');
+        
+        EXECUTE format('
+            CREATE TABLE IF NOT EXISTS %I PARTITION OF raw_metrics_hourly
+            FOR VALUES FROM (%L) TO (%L)',
+            partition_name,
+            partition_date,
+            partition_date + interval '1 month'
+        );
+    END LOOP;
+END $$;
 
 -- Indexes for raw_metrics_hourly
 CREATE INDEX idx_raw_metrics_hourly_account_date ON raw_metrics_hourly(account_id, date DESC, hour);
@@ -805,6 +831,32 @@ CREATE TABLE raw_trades_open (
 
 -- Add comment explaining the nullable account_id
 COMMENT ON COLUMN raw_trades_open.account_id IS 'Account ID - may be temporarily set to login value until proper resolution with platform/mt_version is implemented';
+
+-- Create partitions for raw_trades_closed
+DO $$
+DECLARE
+    start_date date := '2022-01-01';
+    partition_date date;
+    partition_name text;
+BEGIN
+    FOR partition_date IN 
+        SELECT generate_series(
+            start_date,
+            CURRENT_DATE + interval '3 months',
+            interval '1 month'
+        )::date
+    LOOP
+        partition_name := 'raw_trades_open_' || to_char(partition_date, 'YYYY_MM');
+        
+        EXECUTE format('
+            CREATE TABLE IF NOT EXISTS %I PARTITION OF raw_trades_open
+            FOR VALUES FROM (%L) TO (%L)',
+            partition_name,
+            partition_date,
+            partition_date + interval '1 month'
+        );
+    END LOOP;
+END $$;
 
 -- Indexes for raw_trades_open
 CREATE INDEX idx_raw_trades_open_account_id ON raw_trades_open(account_id, trade_date DESC);
@@ -1543,7 +1595,11 @@ BEGIN
     -- Determine date column based on table
     IF table_name = 'raw_metrics_daily' THEN
         date_column := 'date';
+    ELSIF table_name = 'raw_metrics_hourly' THEN
+        date_column := 'date';
     ELSIF table_name = 'raw_trades_closed' THEN
+        date_column := 'trade_date';
+    ELSIF table_name = 'raw_trades_open' THEN
         date_column := 'trade_date';
     ELSE
         RAISE EXCEPTION 'Unknown table for partitioning: %', table_name;
@@ -1620,24 +1676,3 @@ GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA prop_trading_model TO PUBLI
 
 -- Grant permissions on sequences
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA prop_trading_model TO PUBLIC;
-
--- ========================================
--- Initial Data Load
--- ========================================
-
--- Add any initial data or configurations here
-
--- ========================================
--- Schedule Maintenance Jobs (optional)
--- ========================================
-
--- Schedule materialized view refresh (requires pg_cron extension)
--- SELECT cron.schedule('refresh-materialized-views', '0 */2 * * *', 'SELECT prop_trading_model.refresh_materialized_views();');
-
--- Schedule partition maintenance
--- SELECT cron.schedule('create-new-partitions', '0 0 1 * *', 'SELECT prop_trading_model.create_monthly_partitions(''raw_metrics_daily'', CURRENT_DATE, CURRENT_DATE + interval ''3 months'');');
--- SELECT cron.schedule('create-new-partitions-trades', '0 0 1 * *', 'SELECT prop_trading_model.create_monthly_partitions(''raw_trades_closed'', CURRENT_DATE, CURRENT_DATE + interval ''3 months'');');
-
--- Note: Final schema ready for use!
--- This consolidated schema includes all tables, indexes, functions, and views
--- No separate migrations needed during early development

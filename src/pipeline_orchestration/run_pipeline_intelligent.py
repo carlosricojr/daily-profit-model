@@ -58,7 +58,7 @@ class IntelligentPipelineOrchestrator:
             "feature_engineering": {
                 "name": "Feature Engineering",
                 "scripts": [
-                    ("engineer_features", "feature_engineering.engineer_features_v2"),
+                    ("engineer_features", "feature_engineering.feature_engineering"),
                     ("build_training_data", "feature_engineering.build_training_data"),
                 ],
             },

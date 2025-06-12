@@ -28,17 +28,23 @@ class TestIntelligentMetricsIngestion(unittest.TestCase):
         from data_ingestion.ingest_metrics_intelligent import IntelligentMetricsIngester
         
         # Mock the database manager
-        self.mock_db_manager = Mock()
-        self.mock_db_manager.model_db = Mock()
+        self.mock_db_manager = MagicMock()
+        self.mock_db_manager.model_db = MagicMock()
         mock_db_manager_class.return_value = self.mock_db_manager
         
         # Mock API client
-        self.mock_api_client = Mock()
+        self.mock_api_client = MagicMock()
         mock_api_client_class.return_value = self.mock_api_client
         
         # Create ingester with mocked dependencies
         self.ingester = IntelligentMetricsIngester()
         self.ingester.api_client = self.mock_api_client
+        self.ingester.db_manager = self.mock_db_manager  # Ensure ingester uses our mock
+        
+        # Mock the transform methods to avoid complex transformation logic in tests
+        self.ingester._transform_hourly_metric = Mock(side_effect=lambda x: {"transformed": True, **x})
+        self.ingester._transform_daily_metric = Mock(side_effect=lambda x: {"transformed": True, **x})
+        self.ingester._transform_alltime_metric = Mock(side_effect=lambda x: {"transformed": True, **x})
     
     def test_get_missing_hourly_records(self):
         """Test the precise missing hourly record detection."""
@@ -49,6 +55,10 @@ class TestIntelligentMetricsIngestion(unittest.TestCase):
             ("789012", date(2024, 1, 1)),
             ("789012", date(2024, 1, 2))
         ]
+        
+        # Since the ingester catches exceptions and falls back to assuming all hours are missing,
+        # we need to properly mock the execute_query to return an iterable result.
+        # The query will return existing hourly records that should be excluded from missing.
         
         # Mock database response - simulate some existing hourly records
         # Missing hours: account 123456 on 2024-01-01 hours 10-23
@@ -65,6 +75,8 @@ class TestIntelligentMetricsIngestion(unittest.TestCase):
         ]
         # Account 789012 on 2024-01-02 has no records (all 24 hours missing)
         
+        # The query only returns existing records from hourly table
+        # So we simulate the records that exist (not missing)
         self.mock_db_manager.model_db.execute_query.return_value = existing_records
         
         # Call the method
@@ -243,36 +255,47 @@ class TestIntelligentPipelineIntegration(unittest.TestCase):
         from data_ingestion.ingest_metrics_intelligent import IntelligentMetricsIngester
         
         # Set up mocks
-        mock_db = Mock()
-        mock_db_manager = Mock()
+        mock_db = MagicMock()
+        mock_db_manager = MagicMock()
         mock_db_manager.model_db = mock_db
         mock_db_manager_class.return_value = mock_db_manager
         
-        mock_api_client = Mock()
+        mock_api_client = MagicMock()
         mock_api_client_class.return_value = mock_api_client
         
         ingester = IntelligentMetricsIngester()
         ingester.api_client = mock_api_client
+        ingester.db_manager = mock_db_manager  # Ensure the ingester uses our mock
         
-        # Mock missing daily dates
+        # Mock the database queries in order
+        # Each query result must be an iterable (list)
         mock_db.execute_query.side_effect = [
-            # _get_missing_daily_dates
+            # _get_missing_daily_dates query result
             [{"date": date(2024, 1, 1)}, {"date": date(2024, 1, 2)}],
-            # _get_account_ids_from_daily_range
+            # _ingest_daily_for_dates will make API calls (no DB queries)
+            # _get_account_ids_from_daily_range query result
             [{"account_id": "123456"}, {"account_id": "789012"}],
-            # _get_account_date_pairs_from_daily
+            # _get_account_date_pairs_from_daily query result
             [
                 {"account_id": "123456", "date": date(2024, 1, 1)},
                 {"account_id": "123456", "date": date(2024, 1, 2)},
                 {"account_id": "789012", "date": date(2024, 1, 1)},
                 {"account_id": "789012", "date": date(2024, 1, 2)}
             ],
-            # _get_missing_hourly_records
-            []  # No existing records
+            # _get_missing_hourly_records query result (existing records)
+            []  # No existing records, so all will be missing
         ]
         
-        # Mock API responses
+        # Mock API responses - return empty iterators
         ingester.api_client.get_metrics = Mock(return_value=iter([[]]))
+        
+        # Mock the insert method to prevent actual DB writes
+        ingester._insert_batch_with_upsert = Mock(return_value=0)
+        
+        # Mock the transform methods
+        ingester._transform_hourly_metric = Mock(side_effect=lambda x: {"transformed": True, **x})
+        ingester._transform_daily_metric = Mock(side_effect=lambda x: {"transformed": True, **x})
+        ingester._transform_alltime_metric = Mock(side_effect=lambda x: {"transformed": True, **x})
         
         # Run the flow
         start_date = date(2024, 1, 1)
