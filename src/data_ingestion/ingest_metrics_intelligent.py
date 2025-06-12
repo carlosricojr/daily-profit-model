@@ -1106,22 +1106,16 @@ class IntelligentMetricsIngester(BaseIngester):
                     logger.debug(f"API call {api_call_count} returned {len(records)} records")
                     
                     for record in records:
-                        # Only process records that were actually missing
-                        account_id = str(record.get('accountId', record.get('account_id', '')))
-                        record_date = self._parse_date_from_record(record)
-                        record_hour = int(record.get('hour', -1))
+                        # Process all records since API call was made for missing data only
+                        transformed = self._transform_hourly_metric(record)
+                        batch_data.append(transformed)
                         
-                        # Verify this record was in our missing set
-                        if (account_id, record_date, record_hour) in set(missing_slots):
-                            transformed = self._transform_hourly_metric(record)
-                            batch_data.append(transformed)
-                            
-                            if len(batch_data) >= self.config.batch_size:
-                                rows_inserted = self._insert_batch_with_upsert(batch_data, MetricType.HOURLY)
-                                total_records += len(batch_data)
-                                total_inserted += rows_inserted
-                                logger.debug(f"Inserted batch of {len(batch_data)} records, {rows_inserted} new")
-                                batch_data = []
+                        if len(batch_data) >= self.config.batch_size:
+                            rows_inserted = self._insert_batch_with_upsert(batch_data, MetricType.HOURLY)
+                            total_records += len(batch_data)
+                            total_inserted += rows_inserted
+                            logger.debug(f"Inserted batch of {len(batch_data)} records, {rows_inserted} new")
+                            batch_data = []
                 
                 # Insert remaining records
                 if batch_data:

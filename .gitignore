@@ -221,3 +221,6 @@ src/db_schema/archive/
 
 # Ignore frontend
 alpex-frontend/
+
+# MCP
+.mcp.json
