@@ -1,6 +1,6 @@
 """
-Main orchestration script for the daily profit model pipeline.
-Coordinates execution of all pipeline stages from data ingestion to predictions.
+Intelligent pipeline orchestration that only fetches missing data.
+Replaces the original run_pipeline.py with smarter data fetching logic.
 """
 
 import os
@@ -22,8 +22,8 @@ from utils.schema_manager import SchemaManager
 logger = logging.getLogger(__name__)
 
 
-class PipelineOrchestrator:
-    """Orchestrates the execution of the daily profit model pipeline."""
+class IntelligentPipelineOrchestrator:
+    """Orchestrates the execution of the daily profit model pipeline with intelligent data fetching."""
 
     def __init__(self):
         """Initialize the pipeline orchestrator."""
@@ -40,12 +40,10 @@ class PipelineOrchestrator:
             "ingestion": {
                 "name": "Data Ingestion",
                 "scripts": [
-                    ("ingest_accounts", "data_ingestion.ingest_accounts"),
                     ("ingest_plans", "data_ingestion.ingest_plans"),
+                    ("ingest_metrics_intelligent", "data_ingestion.ingest_metrics_intelligent"),
+                    ("ingest_trades_intelligent", "data_ingestion.ingest_trades_intelligent"),
                     ("ingest_regimes", "data_ingestion.ingest_regimes"),
-                    ("ingest_metrics_optimized", "data_ingestion.ingest_metrics"),
-                    ("ingest_trades_open", "data_ingestion.ingest_trades"),
-                    ("ingest_trades_closed", "data_ingestion.ingest_trades"),
                 ],
             },
             "preprocessing": {
@@ -83,9 +81,10 @@ class PipelineOrchestrator:
         dry_run: bool = False,
         force_recreate_schema: bool = False,
         preserve_data: bool = True,
+        force_full_refresh: bool = False,
     ) -> Dict[str, Any]:
         """
-        Run the pipeline stages.
+        Run the pipeline stages with intelligent data fetching.
 
         Args:
             stages: List of stages to run. If None, runs all stages.
@@ -95,6 +94,7 @@ class PipelineOrchestrator:
             dry_run: If True, only show what would be executed
             force_recreate_schema: If True, drop and recreate schema (loses all data!)
             preserve_data: If True, preserve existing data during schema migrations
+            force_full_refresh: If True, ignore existing data and fetch everything
 
         Returns:
             Dictionary containing execution results
@@ -113,6 +113,7 @@ class PipelineOrchestrator:
 
         logger.info(f"Pipeline execution started at {start_time}")
         logger.info(f"Stages to run: {stages}")
+        logger.info("Intelligent mode: Only fetching missing data")
 
         if dry_run:
             logger.info("DRY RUN MODE - No actual execution")
@@ -136,8 +137,8 @@ class PipelineOrchestrator:
                     results[stage_name] = {"status": "success", "duration": 0}
 
                 elif stage_name == "ingestion":
-                    results[stage_name] = self._run_ingestion(
-                        start_date, end_date, skip_completed, dry_run
+                    results[stage_name] = self._run_intelligent_ingestion(
+                        start_date, end_date, skip_completed, dry_run, force_full_refresh
                     )
 
                 elif stage_name == "preprocessing":
@@ -243,84 +244,103 @@ class PipelineOrchestrator:
             else:
                 logger.info("Database schema is already compliant. No changes needed.")
 
-    def _run_ingestion(
+    def _run_intelligent_ingestion(
         self,
         start_date: Optional[date],
         end_date: Optional[date],
         skip_completed: bool,
         dry_run: bool,
+        force_full_refresh: bool,
     ) -> Dict[str, Any]:
-        """Run data ingestion scripts."""
+        """Run data ingestion scripts with intelligent data fetching."""
         results = {"status": "success", "scripts": {}}
 
         # Get the actual module paths from configuration
         script_modules = dict(self.stages["ingestion"]["scripts"])
 
         # Ingestion commands - optimized order
-        commands = [
-            # Plans first - from CSV (no dependencies)
-            ("ingest_plans", ["--csv-dir", "../raw-data/plans", "--log-level", "INFO"]),
-            # Optimized metrics ingestion - daily first, then targeted alltime
-            (
-                "ingest_metrics_optimized",
-                [
-                    "training",
-                    str(start_date) if start_date else "2024-01-01",
-                    "--end-date",
-                    str(end_date)
-                    if end_date
-                    else str(date.today() - timedelta(days=1)),
-                    "--log-level",
-                    "INFO",
-                ],
-            ),
+        commands = []
+
+        # Plans first - from CSV (no dependencies)
+        commands.append(
+            ("ingest_plans", ["--csv-dir", "../raw-data/plans", "--log-level", "INFO"])
+        )
+
+        # Intelligent metrics ingestion
+        metrics_args = ["--log-level", "INFO"]
+        if start_date:
+            metrics_args.extend(["--start-date", str(start_date)])
+        if end_date:
+            metrics_args.extend(["--end-date", str(end_date)])
+        if force_full_refresh:
+            metrics_args.append("--force-refresh")
+        
+        commands.append(("ingest_metrics_intelligent", metrics_args))
+
+        # Intelligent trades ingestion
+        if start_date and end_date:
             # Trades open - only recent
-            (
-                "ingest_trades_open",
-                [
-                    "open",
-                    "--end-date",
-                    str(end_date)
-                    if end_date
-                    else str(date.today() - timedelta(days=1)),
-                    "--log-level",
-                    "INFO",
-                ],
-            ),
-            # Trades closed - with date range and batching
-            (
-                "ingest_trades_closed",
-                [
-                    "closed",
-                    "--start-date",
-                    str(start_date) if start_date else "2024-01-01",
-                    "--end-date",
-                    str(end_date)
-                    if end_date
-                    else str(date.today() - timedelta(days=1)),
-                    "--batch-days",
-                    "7",
-                    "--log-level",
-                    "INFO",
-                ],
-            ),
-            # Regimes - with date range
-            (
-                "ingest_regimes",
-                [
-                    "--start-date",
-                    str(start_date) if start_date else "2024-01-01",
-                    "--end-date",
-                    str(end_date)
-                    if end_date
-                    else str(date.today() - timedelta(days=1)),
-                    "--log-level",
-                    "INFO",
-                ],
-            ),
-            # Accounts - LAST, after we have logins from other sources
-            ("ingest_accounts", ["--log-level", "INFO"]),
-        ]
+            commands.append(
+                (
+                    "ingest_trades_intelligent",
+                    [
+                        "open",
+                        "--end-date",
+                        str(end_date),
+                        "--log-level",
+                        "INFO",
+                    ],
+                )
+            )
+            # Trades closed - with date range
+            commands.append(
+                (
+                    "ingest_trades_intelligent",
+                    [
+                        "closed",
+                        "--start-date",
+                        str(start_date),
+                        "--end-date",
+                        str(end_date),
+                        "--log-level",
+                        "INFO",
+                    ],
+                )
+            )
+        else:
+            # Without date range, get all recent trades
+            commands.append(
+                (
+                    "ingest_trades_intelligent",
+                    [
+                        "open",
+                        "--log-level",
+                        "INFO",
+                    ],
+                )
+            )
+            commands.append(
+                (
+                    "ingest_trades_intelligent",
+                    [
+                        "closed",
+                        "--log-level",
+                        "INFO",
+                    ],
+                )
+            )
+
+        # Regimes - with date range
+        regime_args = ["--log-level", "INFO"]
+        if start_date:
+            regime_args.extend(["--start-date", str(start_date)])
+        if end_date:
+            regime_args.extend(["--end-date", str(end_date)])
+        
+        commands.append(("ingest_regimes", regime_args))
+
+        # Note: Accounts ingestion removed - account IDs are now resolved batch-wise 
+        # after trades ingestion using data from raw_metrics_alltime
 
         for script_name, args in commands:
             if skip_completed and self._is_stage_completed(script_name):
@@ -329,7 +349,15 @@ class PipelineOrchestrator:
                 continue
 
             # Get the actual module path from configuration
-            module_path = script_modules.get(script_name, f"data_ingestion.{script_name}")
+            module_path = script_modules.get(script_name)
+            
+            # Handle intelligent metrics separately
+            if script_name == "ingest_metrics_intelligent":
+                module_path = "data_ingestion.ingest_metrics_intelligent"
+            elif script_name == "ingest_trades_intelligent":
+                module_path = "data_ingestion.ingest_trades_intelligent"
+            elif not module_path:
+                module_path = f"data_ingestion.{script_name}"
 
             if dry_run:
                 logger.info(
@@ -581,35 +609,44 @@ class PipelineOrchestrator:
 def main():
     """Main function for command-line execution."""
     parser = argparse.ArgumentParser(
-        description="Run the daily profit model pipeline",
+        description="Run the daily profit model pipeline with intelligent data fetching",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Available stages:
   schema              - Ensure database schema compliance (intelligently migrates without data loss)
-  ingestion          - Ingest data from APIs and CSV files (uses optimized metrics ingestion)
+  ingestion          - Ingest only missing data from APIs and CSV files
   preprocessing      - Create staging snapshots and clean data
   feature_engineering - Engineer features and build training data
   training           - Train the LightGBM model
   prediction         - Generate daily predictions
 
+Key differences from original pipeline:
+  - Metrics ingestion only fetches missing data
+  - Daily metrics are checked first, then only required alltime/hourly data is fetched
+  - Trades ingestion will be optimized to skip existing records (coming soon)
+  - Overall much faster execution when data already exists
+
 Examples:
-  # Run the entire pipeline with date range (optimized for testing)
-  python run_pipeline.py --start-date 2025-06-05 --end-date 2025-06-10
+  # Run the entire pipeline with date range (only fetches missing data)
+  python run_pipeline_intelligent.py --start-date 2025-06-05 --end-date 2025-06-10
   
   # Check what schema changes would be made without applying them
-  python run_pipeline.py --stages schema --dry-run
+  python run_pipeline_intelligent.py --stages schema --dry-run
   
   # Force recreate schema from scratch (DESTROYS ALL DATA!)
-  python run_pipeline.py --stages schema --force-recreate-schema
+  python run_pipeline_intelligent.py --stages schema --force-recreate-schema
   
   # Run only ingestion and preprocessing with date range
-  python run_pipeline.py --stages ingestion preprocessing --start-date 2025-06-05 --end-date 2025-06-10
+  python run_pipeline_intelligent.py --stages ingestion preprocessing --start-date 2025-06-05 --end-date 2025-06-10
+  
+  # Force full refresh (ignore existing data)
+  python run_pipeline_intelligent.py --stages ingestion --force-full-refresh
   
   # Run daily prediction only
-  python run_pipeline.py --stages prediction
+  python run_pipeline_intelligent.py --stages prediction
   
-  # Dry run to see what would be executed with date range
-  python run_pipeline.py --start-date 2025-06-05 --end-date 2025-06-10 --dry-run
+  # Dry run to see what would be executed
+  python run_pipeline_intelligent.py --start-date 2025-06-05 --end-date 2025-06-10 --dry-run
         """,
     )
 
@@ -655,6 +692,11 @@ Examples:
         help="Don't preserve data during schema migrations (faster but destructive)",
     )
     parser.add_argument(
+        "--force-full-refresh",
+        action="store_true",
+        help="Force full data refresh (ignore existing data)",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
@@ -664,10 +706,10 @@ Examples:
     args = parser.parse_args()
 
     # Set up logging
-    setup_logging(log_level=args.log_level, log_file="pipeline_orchestration")
+    setup_logging(log_level=args.log_level, log_file="intelligent_pipeline_orchestration")
 
     # Run pipeline
-    orchestrator = PipelineOrchestrator()
+    orchestrator = IntelligentPipelineOrchestrator()
     try:
         results = orchestrator.run_pipeline(
             stages=args.stages,
@@ -677,6 +719,7 @@ Examples:
             dry_run=args.dry_run,
             force_recreate_schema=args.force_recreate_schema,
             preserve_data=not args.no_preserve_data,
+            force_full_refresh=args.force_full_refresh,
         )
 
         # Exit with appropriate code

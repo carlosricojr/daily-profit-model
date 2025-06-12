@@ -218,3 +218,6 @@ src/checkpoints/
 # Ignore src/db_schema/auto_migrations & archive
 src/db_schema/auto_migrations/
 src/db_schema/archive/
+
+# Ignore frontend
+alpex-frontend/
