@@ -500,9 +500,11 @@ class BaseIngester:
                 pipeline_stage=f"ingest_{self.ingestion_type}",
                 execution_date=datetime.now().date(),
                 status=status,
+                execution_time_seconds=self.metrics.processing_time,
                 records_processed=self.metrics.new_records,
                 error_message=error_message,
                 execution_details=self.metrics.to_dict(),
+                records_failed=self.metrics.invalid_records,
             )
         except Exception as e:
             logger.error(
@@ -562,3 +564,19 @@ class BaseIngester:
             Number of records ingested
         """
         raise NotImplementedError("Subclasses must implement the ingest method")
+
+    # ------------------------------------------------------------------
+    # Public helpers
+    # ------------------------------------------------------------------
+
+    def close(self):  # noqa: D401 – simple close helper
+        """Close underlying resources (e.g. database pools).
+
+        This is intentionally lightweight so that test suites – which spin up
+        many short-lived ingester instances – do not leak open connections.
+        """
+        try:
+            if hasattr(self, "db_manager") and hasattr(self.db_manager, "close"):
+                self.db_manager.close()
+        except Exception as exc:  # pragma: no cover – defensive
+            logger.warning("Failed to close BaseIngester resources", error=str(exc))

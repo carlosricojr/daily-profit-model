@@ -425,15 +425,6 @@ class RawMetricsAlltime(Base):
     max_val_to_eqty_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
     mean_account_margin: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
     mean_firm_margin: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
-    mean_trades_per_day: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
-    median_trades_per_day: Mapped[Optional[int]] = mapped_column(Integer)
-    min_trades_per_day: Mapped[Optional[int]] = mapped_column(Integer)
-    max_trades_per_day: Mapped[Optional[int]] = mapped_column(Integer)
-    cv_trades_per_day: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
-    mean_idle_days: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
-    median_idle_days: Mapped[Optional[int]] = mapped_column(Integer)
-    max_idle_days: Mapped[Optional[int]] = mapped_column(Integer)
-    min_idle_days: Mapped[Optional[int]] = mapped_column(Integer)
     num_traded_symbols: Mapped[Optional[int]] = mapped_column(Integer)
     most_traded_symbol: Mapped[Optional[str]] = mapped_column(String(50))
     most_traded_smb_trades: Mapped[Optional[int]] = mapped_column(Integer)
@@ -1045,3 +1036,31 @@ class StgAccountsDailySnapshots(Base):
     days_since_last_trade: Mapped[Optional[int]] = mapped_column(Integer)
     created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
     updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+
+
+class TradeRecon(Base):
+    """ORM mapping for prop_trading_model.trade_recon (reconciliation metadata)."""
+    __tablename__ = 'trade_recon'
+    __table_args__ = (
+        PrimaryKeyConstraint('account_id', name='trade_recon_pkey'),
+        Index('idx_trade_recon_checksum', 'trades_recon_checksum'),
+        Index('idx_trade_recon_last_checked', 'last_checked'),
+        {'schema': 'prop_trading_model'}
+    )
+
+    account_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    has_alltime: Mapped[bool] = mapped_column(Boolean, server_default=text('false'))
+    num_trades_alltime: Mapped[Optional[int]] = mapped_column(Integer)
+    has_daily: Mapped[bool] = mapped_column(Boolean, server_default=text('false'))
+    num_trades_daily: Mapped[Optional[int]] = mapped_column(Integer)
+    has_hourly: Mapped[bool] = mapped_column(Boolean, server_default=text('false'))
+    num_trades_hourly: Mapped[Optional[int]] = mapped_column(Integer)
+    has_raw_closed: Mapped[bool] = mapped_column(Boolean, server_default=text('false'))
+    num_trades_raw_closed: Mapped[Optional[int]] = mapped_column(Integer)
+    trades_recon_checksum: Mapped[bool] = mapped_column(Boolean, server_default=text('false'))
+    issues: Mapped[Optional[dict]] = mapped_column(JSONB)
+    last_checked: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    last_reconciled: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    failed_attempts: Mapped[int] = mapped_column(Integer, server_default=text('0'))
+    last_failed_attempt: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))

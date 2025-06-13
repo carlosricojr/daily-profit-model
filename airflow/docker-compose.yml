@@ -2,7 +2,7 @@ x-airflow-common:
   &airflow-common
   image: apache/airflow:3.0.2-python3.12
   env_file:
-    - ../.env
+    - .env.parent
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor

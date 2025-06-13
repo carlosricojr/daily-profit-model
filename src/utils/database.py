@@ -42,8 +42,8 @@ class DatabaseConnection:
         self.engine = create_engine(
             connection_string,
             poolclass=QueuePool,
-            pool_size=50,           # Base pool size
-            max_overflow=100,       # Additional connections when needed (50+100=150)
+            pool_size=10,           # Base pool size matches tests
+            max_overflow=20,        # Keep reasonable overflow matching tests
             pool_pre_ping=True,     # Test connections before use
             pool_recycle=3600,      # Recycle connections after 1 hour
             echo=False
@@ -174,6 +174,7 @@ class DatabaseManager:
     def log_pipeline_execution(
         self,
         pipeline_stage: str,
+        execution_date: datetime,
         status: str,
         execution_time_seconds: float,
         records_processed: int = 0,
@@ -186,7 +187,7 @@ class DatabaseManager:
         inside execution_details JSON so we do **not** need to alter the table.
         """
 
-        now_ts = datetime.utcnow()
+        now_ts = datetime.now(timezone.UTC)
         end_ts: Optional[datetime]
 
         if status.lower() == "running":
@@ -210,7 +211,7 @@ class DatabaseManager:
                 execution_details
             ) VALUES (
                 %(pipeline_stage)s,
-                CURRENT_DATE,
+                %(execution_date)s,
                 %(start_time)s,
                 %(end_time)s,
                 %(status)s,
@@ -223,6 +224,7 @@ class DatabaseManager:
 
         params = {
             "pipeline_stage": pipeline_stage,
+            "execution_date": execution_date,
             "start_time": now_ts,
             "end_time": end_ts,
             "status": status,

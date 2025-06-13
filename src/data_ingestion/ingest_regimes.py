@@ -266,9 +266,6 @@ class RegimesIngester(BaseIngester):
             self.enable_deduplication = enable_deduplication
 
         try:
-            # Log pipeline execution start
-            self.log_pipeline_execution("running")
-
             # Handle checkpoint resume
             checkpoint = None
             if resume_from_checkpoint and not force_full_refresh:
@@ -398,15 +395,10 @@ class RegimesIngester(BaseIngester):
             if resume_from_checkpoint:
                 self.checkpoint_manager.clear_checkpoint()
 
-            # Log successful completion
-            self.log_pipeline_execution("success")
-
             logger.info(self.get_metrics_summary())
             return self.metrics.new_records
 
         except Exception as e:
-            # Log failure
-            self.log_pipeline_execution("failed", str(e))
             logger.error(f"Failed to ingest regimes data: {str(e)}")
             raise
 

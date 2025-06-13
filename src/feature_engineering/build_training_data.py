@@ -53,6 +53,10 @@ class TrainingDataBuilder:
                 pipeline_stage="build_training_data",
                 execution_date=datetime.now().date(),
                 status="running",
+                execution_time_seconds=0,
+                records_processed=0,
+                error_message=None,
+                records_failed=0,
             )
 
             # Determine date range
@@ -82,13 +86,10 @@ class TrainingDataBuilder:
                 pipeline_stage="build_training_data",
                 execution_date=datetime.now().date(),
                 status="success",
+                execution_time_seconds=(datetime.now() - start_time).total_seconds(),
                 records_processed=total_records,
-                execution_details={
-                    "duration_seconds": (datetime.now() - start_time).total_seconds(),
-                    "start_date": str(start_date),
-                    "end_date": str(end_date),
-                    "force_rebuild": force_rebuild,
-                },
+                error_message=None,
+                records_failed=0,
             )
 
             logger.info(f"Successfully created {total_records} training records")
@@ -100,8 +101,10 @@ class TrainingDataBuilder:
                 pipeline_stage="build_training_data",
                 execution_date=datetime.now().date(),
                 status="failed",
+                execution_time_seconds=(datetime.now() - start_time).total_seconds(),
+                records_processed=0,
                 error_message=str(e),
-                records_processed=total_records,
+                records_failed=total_records,
             )
             logger.error(f"Failed to build training data: {str(e)}")
             raise

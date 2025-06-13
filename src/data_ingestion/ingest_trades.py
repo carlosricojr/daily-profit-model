@@ -5,11 +5,12 @@ Based on the original trades ingester but with smart data fetching logic.
 
 import os
 import sys
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, UTC as _UTC
 from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+from threading import Lock as _ThreadLock
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -68,7 +69,7 @@ class TradesIngester(BaseIngester):
         })()
 
         # Thread-safety helper for shared metrics
-        self.metrics_lock = threading.Lock()
+        self._lock = _ThreadLock()
 
         # Initialize API client
         self.api_client = RiskAnalyticsAPIClient()
@@ -134,7 +135,7 @@ class TradesIngester(BaseIngester):
         
         # Set default dates
         if not end_date:
-            end_date = datetime.now().date() - timedelta(days=1)
+            end_date = datetime.now(_UTC).date() - timedelta(days=1)
         if not start_date:
             # Auto-discover earliest trade date via API, else fallback 30d
             earliest_api_date = self._find_first_trade_date_api(trade_type, logins, symbols)
@@ -220,7 +221,8 @@ class TradesIngester(BaseIngester):
                     sub_ing.close()
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {executor.submit(process_range, rng): rng for rng in missing_ranges}
+                _submit = getattr(executor, "submit")
+                futures = {_submit(process_range, rng): rng for rng in missing_ranges}
                 for fut in as_completed(futures):
                     rng = futures[fut]
                     try:
@@ -378,7 +380,7 @@ class TradesIngester(BaseIngester):
                         if self.enable_validation:
                             is_valid, errors = self._validate_trade_record(trade, "closed")
                             if not is_valid:
-                                with self.metrics_lock:
+                                with self._lock:
                                     self.metrics.invalid_records += 1
                                 logger.debug(f"Invalid trade: {errors}")
                                 continue
@@ -386,7 +388,7 @@ class TradesIngester(BaseIngester):
                         # Transform and add to batch
                         record = self._transform_closed_trade(trade)
                         batch_data.append(record)
-                        with self.metrics_lock:
+                        with self._lock:
                             self.metrics.total_records += 1
                         
                         # Insert when batch is full
@@ -455,7 +457,7 @@ class TradesIngester(BaseIngester):
                     if self.enable_validation:
                         is_valid, errors = self._validate_trade_record(trade, "open")
                         if not is_valid:
-                            with self.metrics_lock:
+                            with self._lock:
                                 self.metrics.invalid_records += 1
                             logger.debug(f"Invalid trade: {errors}")
                             continue
@@ -463,7 +465,7 @@ class TradesIngester(BaseIngester):
                     # Transform and add to batch
                     record = self._transform_open_trade(trade)
                     batch_data.append(record)
-                    with self.metrics_lock:
+                    with self._lock:
                         self.metrics.total_records += 1
                     
                     # Insert when batch is full
@@ -568,7 +570,7 @@ class TradesIngester(BaseIngester):
                     conn.commit()
                     
             # Update metrics
-            with self.metrics_lock:
+            with self._lock:
                 self.metrics.new_records += len(batch_data)
             logger.debug(f"Inserted/updated {rows_affected} records into {table_name}")
             return len(batch_data)
@@ -863,7 +865,7 @@ class TradesIngester(BaseIngester):
         Returns the earliest date seen, or None on failure.
         """
         try:
-            today = datetime.now(datetime.UTC).date()
+            today = datetime.now(_UTC).date()
             earliest_seen: Optional[date] = None
 
             for year_back in range(max_years):

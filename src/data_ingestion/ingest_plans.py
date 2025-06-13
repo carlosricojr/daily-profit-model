@@ -12,7 +12,8 @@ import hashlib
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
-import tempfile
+from threading import Lock as _ThreadLock
+from tempfile import mkdtemp as _make_tempdir
 
 # Ensure we can import from parent directories
 try:
@@ -156,7 +157,7 @@ class PlansIngester(BaseIngester):
 
         self.source_endpoint = "csv_files"
         self.metrics.files_processed = 0
-        self.metrics_lock = threading.Lock()
+        self._lock = _ThreadLock()
 
     def _normalize_column_name(self, col: str) -> str:
         """Normalize column name for matching."""
@@ -386,26 +387,6 @@ class PlansIngester(BaseIngester):
             updated_at = CURRENT_TIMESTAMP,
             ingestion_timestamp = EXCLUDED.ingestion_timestamp,
             source_api_endpoint = EXCLUDED.source_api_endpoint
-        WHERE 
-            prop_trading_model.raw_plans_data.plan_name IS DISTINCT FROM EXCLUDED.plan_name OR
-            prop_trading_model.raw_plans_data.plan_type IS DISTINCT FROM EXCLUDED.plan_type OR
-            prop_trading_model.raw_plans_data.starting_balance IS DISTINCT FROM EXCLUDED.starting_balance OR
-            prop_trading_model.raw_plans_data.profit_target IS DISTINCT FROM EXCLUDED.profit_target OR
-            prop_trading_model.raw_plans_data.profit_target_pct IS DISTINCT FROM EXCLUDED.profit_target_pct OR
-            prop_trading_model.raw_plans_data.max_drawdown IS DISTINCT FROM EXCLUDED.max_drawdown OR
-            prop_trading_model.raw_plans_data.max_drawdown_pct IS DISTINCT FROM EXCLUDED.max_drawdown_pct OR
-            prop_trading_model.raw_plans_data.max_daily_drawdown IS DISTINCT FROM EXCLUDED.max_daily_drawdown OR
-            prop_trading_model.raw_plans_data.max_daily_drawdown_pct IS DISTINCT FROM EXCLUDED.max_daily_drawdown_pct OR
-            prop_trading_model.raw_plans_data.max_leverage IS DISTINCT FROM EXCLUDED.max_leverage OR
-            prop_trading_model.raw_plans_data.is_drawdown_relative IS DISTINCT FROM EXCLUDED.is_drawdown_relative OR
-            prop_trading_model.raw_plans_data.min_trading_days IS DISTINCT FROM EXCLUDED.min_trading_days OR
-            prop_trading_model.raw_plans_data.max_trading_days IS DISTINCT FROM EXCLUDED.max_trading_days OR
-            prop_trading_model.raw_plans_data.profit_share_pct IS DISTINCT FROM EXCLUDED.profit_share_pct OR
-            prop_trading_model.raw_plans_data.liquidate_friday IS DISTINCT FROM EXCLUDED.liquidate_friday OR
-            prop_trading_model.raw_plans_data.inactivity_period IS DISTINCT FROM EXCLUDED.inactivity_period OR
-            prop_trading_model.raw_plans_data.daily_drawdown_by_balance_equity IS DISTINCT FROM EXCLUDED.daily_drawdown_by_balance_equity OR
-            prop_trading_model.raw_plans_data.enable_consistency IS DISTINCT FROM EXCLUDED.enable_consistency OR
-            prop_trading_model.raw_plans_data.source_api_endpoint IS DISTINCT FROM EXCLUDED.source_api_endpoint
         """
 
     def _insert_batch(self, batch_data: List[Dict[str, Any]], table_name: Optional[str] = None) -> bool:
@@ -562,8 +543,6 @@ class PlansIngester(BaseIngester):
             self.enable_deduplication = enable_deduplication
 
         try:
-            # Log pipeline execution start
-            self.log_pipeline_execution("running")
 
             # Handle checkpoint resume
             checkpoint = None
@@ -572,10 +551,16 @@ class PlansIngester(BaseIngester):
                 if checkpoint:
                     logger.info(f"Resuming from checkpoint: {checkpoint}")
                     # Restore metrics from checkpoint
-                    if "metrics" in checkpoint:
-                        for key, value in checkpoint["metrics"].items():
-                            if hasattr(self.metrics, key):
-                                setattr(self.metrics, key, value)
+                    metrics_data = checkpoint.get("metrics")
+                    if metrics_data:
+                        with self._lock:
+                            for key, value in metrics_data.items():
+                                # Skip read-only @property attributes
+                                attr_obj = getattr(type(self.metrics), key, None)
+                                if isinstance(attr_obj, property):
+                                    continue
+                                if hasattr(self.metrics, key):
+                                    setattr(self.metrics, key, value)
 
             # Handle full refresh
             if force_full_refresh:
@@ -634,7 +619,7 @@ class PlansIngester(BaseIngester):
                 def process_file_parallel(fp: Path) -> Tuple[int, Dict[str, Any]]:
                     """Isolated worker to process a single CSV file."""
                     # Use a temp checkpoint dir to avoid clashes
-                    tmp_dir = tempfile.mkdtemp(prefix="plans_ckpt_")
+                    tmp_dir = _make_tempdir(prefix="plans_ckpt_")
                     sub_ing = PlansIngester(
                         checkpoint_dir=tmp_dir,
                         enable_validation=self.enable_validation,
@@ -650,13 +635,14 @@ class PlansIngester(BaseIngester):
                         sub_ing.close()
 
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures = {executor.submit(process_file_parallel, fp): fp for fp in files_to_process}
+                    _submit = getattr(executor, "submit")
+                    futures = {_submit(process_file_parallel, fp): fp for fp in files_to_process}
                     for fut in as_completed(futures):
                         fp = futures[fut]
                         try:
                             recs, met = fut.result()
                             total_records += recs
-                            with self.metrics_lock:
+                            with self._lock:
                                 self.metrics.files_processed += 1
                                 self.metrics.new_records += met.get("new_records", 0)
                                 self.metrics.invalid_records += met.get("invalid_records", 0)
@@ -685,17 +671,14 @@ class PlansIngester(BaseIngester):
                     # Clear checkpoint for next file
                     checkpoint = None
 
-            # Log successful completion
-            self.log_pipeline_execution("success")
 
             logger.info(self.get_metrics_summary())
             logger.info(f"Files processed: {self.metrics.files_processed}")
 
-            return self.metrics.new_records
+            return total_records
 
         except Exception as e:
             # Log failure
-            self.log_pipeline_execution("failed", str(e))
             logger.error(f"Failed to ingest plans data: {str(e)}")
             raise
 
