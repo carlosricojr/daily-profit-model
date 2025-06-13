@@ -1,325 +1,199 @@
 """
-Database connection utilities for the daily profit model.
-Handles connections to both the source Supabase database and the model's PostgreSQL schema.
+Simplified database connection utilities using SQLAlchemy.
+Provides all functionality required by the data pipeline modules.
 """
-
 import os
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Optional, Any, Dict, List, Tuple
 from contextlib import contextmanager
-from psycopg2.extras import RealDictCursor, execute_batch
-from psycopg2.pool import SimpleConnectionPool
-import pandas as pd
 from datetime import datetime
+import psycopg2
+from psycopg2.extras import RealDictCursor, execute_batch
+from sqlalchemy import create_engine, text, MetaData
+from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.pool import QueuePool
+import pandas as pd
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# Connection strings from environment
+MODEL_DATABASE_URL = os.getenv('DB_CONNECTION_STRING_SESSION_POOLER')
+SOURCE_DATABASE_URL = os.getenv('DB_CONNECTION_STRING_SESSION_POOLER')  # Same DB, different schema
+
+if not MODEL_DATABASE_URL:
+    raise ValueError("DB_CONNECTION_STRING_SESSION_POOLER not set in environment")
+
 
 class DatabaseConnection:
-    """Manages PostgreSQL database connections with connection pooling."""
-
-    def __init__(
-        self,
-        host: str,
-        port: int,
-        database: str,
-        user: str,
-        password: str,
-        schema: Optional[str] = None,
-        min_connections: int = 1,
-        max_connections: int = 10,
-    ):
-        """
-        Initialize database connection manager.
-
-        Args:
-            host: Database host
-            port: Database port
-            database: Database name
-            user: Database user
-            password: Database password
-            schema: Default schema to use (optional)
-            min_connections: Minimum number of connections in pool
-            max_connections: Maximum number of connections in pool
-        """
-        self.connection_params = {
-            "host": host,
-            "port": port,
-            "database": database,
-            "user": user,
-            "password": password,
-        }
+    """Manages a single database connection with all required functionality."""
+    
+    def __init__(self, connection_string: str, schema: str = "prop_trading_model"):
+        """Initialize database connection."""
+        self.connection_string = connection_string
         self.schema = schema
-        self.pool = None
-        self._initialize_pool(min_connections, max_connections)
-
-    def _initialize_pool(self, min_connections: int, max_connections: int):
-        """Initialize connection pool."""
-        try:
-            self.pool = SimpleConnectionPool(
-                min_connections, max_connections, **self.connection_params
-            )
-            logger.info(
-                f"Database connection pool initialized for {self.connection_params['host']}"
-            )
-        except Exception as e:
-            logger.error(f"Failed to initialize connection pool: {str(e)}")
-            raise
-
+        
+        # Create SQLAlchemy engine
+        self.engine = create_engine(
+            connection_string,
+            poolclass=QueuePool,
+            pool_size=10,
+            max_overflow=20,
+            pool_pre_ping=True,
+            pool_recycle=3600,
+            echo=False
+        )
+        
+        # Session factory
+        self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+        
+        # Set default schema
+        self._ensure_schema()
+    
+    def _ensure_schema(self):
+        """Ensure the schema exists."""
+        with self.engine.begin() as conn:
+            conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {self.schema}"))
+    
     @contextmanager
     def get_connection(self):
-        """
-        Context manager for database connections.
-        Automatically handles connection checkout/return from pool.
-        """
-        connection = None
+        """Get a raw psycopg2 connection with automatic transaction handling."""
+        conn = self.engine.raw_connection()
         try:
-            connection = self.pool.getconn()
-            if self.schema:
-                with connection.cursor() as cursor:
-                    cursor.execute(f"SET search_path TO {self.schema}")
-            yield connection
-            connection.commit()
+            # Set search path for this connection
+            with conn.cursor() as cur:
+                cur.execute(f"SET search_path TO {self.schema}, public")
+            yield conn
+            conn.commit()
         except Exception as e:
-            if connection:
-                connection.rollback()
-            logger.error(f"Database error: {str(e)}")
+            conn.rollback()
+            logger.error(f"Database error: {e}")
             raise
         finally:
-            if connection:
-                self.pool.putconn(connection)
-
-    def execute_query(
-        self, query: str, params: Optional[tuple] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        Execute a SELECT query and return results as list of dictionaries.
-
-        Args:
-            query: SQL query to execute
-            params: Query parameters (optional)
-
-        Returns:
-            List of dictionaries representing query results
-        """
+            conn.close()
+    
+    def execute_query(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Execute a SELECT query and return results as list of dicts."""
         with self.get_connection() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query, params)
-                return cursor.fetchall()
-
-    def execute_query_df(
-        self, query: str, params: Optional[tuple] = None
-    ) -> pd.DataFrame:
-        """
-        Execute a SELECT query and return results as pandas DataFrame.
-
-        Args:
-            query: SQL query to execute
-            params: Query parameters (optional)
-
-        Returns:
-            pandas DataFrame with query results
-        """
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(query, params or {})
+                return [dict(row) for row in cur.fetchall()]
+    
+    def execute_query_df(self, query: str, params: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
+        """Execute a SELECT query and return results as pandas DataFrame."""
+        with self.engine.connect() as conn:
+            return pd.read_sql_query(text(query), conn, params=params)
+    
+    def execute_command(self, query: str, params: Optional[Dict[str, Any]] = None) -> int:
+        """Execute an INSERT/UPDATE/DELETE command and return affected rows."""
         with self.get_connection() as conn:
-            return pd.read_sql_query(query, conn, params=params)
-
-    def execute_command(self, command: str, params: Optional[tuple] = None) -> int:
-        """
-        Execute an INSERT/UPDATE/DELETE command.
-
-        Args:
-            command: SQL command to execute
-            params: Command parameters (optional)
-
-        Returns:
-            Number of affected rows
-        """
-        with self.get_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(command, params)
-                return cursor.rowcount
-
-    def insert_batch(
-        self,
-        table: str,
-        data: List[Dict[str, Any]],
-        page_size: int = 1000,
-        returning: Optional[str] = None,
-    ) -> List[Any]:
-        """
-        Insert multiple rows efficiently using execute_batch.
-
-        Args:
-            table: Table name
-            data: List of dictionaries containing row data
-            page_size: Batch size for inserts
-            returning: Column to return after insert (optional)
-
-        Returns:
-            List of returned values if returning is specified
-        """
+            with conn.cursor() as cur:
+                cur.execute(query, params or {})
+                return cur.rowcount
+    
+    def insert_batch(self, table: str, data: List[Dict[str, Any]], 
+                    returning: Optional[str] = None) -> Optional[List[Any]]:
+        """Batch insert data into a table."""
         if not data:
-            return []
-
-        # Get column names from first row
+            return [] if returning else None
+        
+        # Get column names from first record
         columns = list(data[0].keys())
-        placeholders = ", ".join(["%s"] * len(columns))
-        columns_str = ", ".join(columns)
-
-        query = f"INSERT INTO {table} ({columns_str}) VALUES ({placeholders})"
+        
+        # Build the INSERT query
+        placeholders = ", ".join([f"%({col})s" for col in columns])
+        query = f"""
+            INSERT INTO {self.schema}.{table} ({", ".join(columns)})
+            VALUES ({placeholders})
+        """
+        
         if returning:
             query += f" RETURNING {returning}"
-
-        values = [[row.get(col) for col in columns] for row in data]
-
-        returned_values = []
+        
         with self.get_connection() as conn:
-            with conn.cursor() as cursor:
+            with conn.cursor() as cur:
                 if returning:
-                    for batch in values:
-                        cursor.execute(query, batch)
-                        returned_values.extend([row[0] for row in cursor.fetchall()])
+                    results = []
+                    for record in data:
+                        cur.execute(query, record)
+                        results.extend([row[0] for row in cur.fetchall()])
+                    return results
                 else:
-                    execute_batch(cursor, query, values, page_size=page_size)
-
-        logger.info(f"Inserted {len(data)} rows into {table}")
-        return returned_values
-
-    def table_exists(self, table_name: str) -> bool:
-        """Check if a table exists in the database."""
+                    execute_batch(cur, query, data)
+                    return None
+    
+    def table_exists(self, table_name: str, schema: Optional[str] = None) -> bool:
+        """Check if a table exists."""
+        schema = schema or self.schema
         query = """
-        SELECT EXISTS (
-            SELECT FROM information_schema.tables 
-            WHERE table_schema = COALESCE(%s, 'public')
-            AND table_name = %s
-        )
+            SELECT EXISTS (
+                SELECT 1 
+                FROM information_schema.tables 
+                WHERE table_schema = %(schema)s 
+                AND table_name = %(table_name)s
+            ) as exists
         """
-        result = self.execute_query(query, (self.schema, table_name))
+        result = self.execute_query(query, {"schema": schema, "table_name": table_name})
         return result[0]["exists"] if result else False
-
-    def get_table_row_count(self, table_name: str) -> int:
-        """Get the number of rows in a table."""
-        query = f"SELECT COUNT(*) as count FROM {table_name}"
+    
+    def get_table_row_count(self, table_name: str, schema: Optional[str] = None) -> int:
+        """Get the row count of a table."""
+        schema = schema or self.schema
+        query = f"SELECT COUNT(*) as count FROM {schema}.{table_name}"
         result = self.execute_query(query)
         return result[0]["count"] if result else 0
-
+    
     def close(self):
         """Close all connections in the pool."""
-        if self.pool:
-            self.pool.closeall()
-            logger.info("Database connection pool closed")
+        self.engine.dispose()
 
 
 class DatabaseManager:
-    """Manages connections to both source and model databases."""
-
+    """Manages both model and source database connections."""
+    
     def __init__(self):
-        """Initialize database manager with connections from environment variables."""
-        # Model database connection (prop_trading_model schema)
-        self.model_db = DatabaseConnection(
-            host=os.getenv("DB_HOST", "localhost"),
-            port=int(os.getenv("DB_PORT", "5432")),
-            database=os.getenv("DB_NAME", "postgres"),
-            user=os.getenv("DB_USER", "postgres"),
-            password=os.getenv("DB_PASSWORD", ""),
-            schema="prop_trading_model",
-        )
-
-        # Source database connection (for regimes_daily)
-        self.source_db = DatabaseConnection(
-            host=os.getenv("DB_HOST", "localhost"),
-            port=int(os.getenv("DB_PORT", "5432")),
-            database=os.getenv("DB_NAME", "postgres"),
-            user=os.getenv("DB_USER", "postgres"),
-            password=os.getenv("DB_PASSWORD", ""),
-            schema="public",  # regimes_daily is in public schema
-        )
-
+        """Initialize database manager with both connections."""
+        # Model database (prop_trading_model schema)
+        self.model_db = DatabaseConnection(MODEL_DATABASE_URL, "prop_trading_model")
+        
+        # Source database (public schema) - same physical database
+        self.source_db = DatabaseConnection(SOURCE_DATABASE_URL, "public")
+        
         logger.info("Database manager initialized")
-        
-        # Ensure schema and migrations are up to date
-        self._ensure_schema()
-        
-    def _ensure_schema(self):
-        """Ensure database schema exists and migrations are applied."""
+    
+    def log_pipeline_execution(self, pipeline_name: str, status: str, 
+                             execution_time_seconds: float, 
+                             records_processed: int = 0,
+                             error_message: Optional[str] = None) -> None:
+        """Log pipeline execution details to the database."""
         try:
-            from pathlib import Path
-            from .migration_handler import MigrationHandler
-            
-            # Get schema directory
-            schema_dir = Path(__file__).parent.parent / "db_schema"
-            
-            # Create migration handler
-            handler = MigrationHandler(self.model_db, schema_dir)
-            
-            # Ensure schema is up to date
-            if handler.ensure_schema_exists():
-                logger.info("Database schema was created or updated")
-            else:
-                logger.info("Database schema is up to date")
-                
-        except Exception as e:
-            logger.error(f"Failed to ensure database schema: {str(e)}")
-            # Don't fail initialization, but log the error
-            # This allows the system to continue if schema already exists
-
-    def log_pipeline_execution(
-        self,
-        pipeline_stage: str,
-        execution_date: datetime,
-        status: str,
-        records_processed: Optional[int] = None,
-        error_message: Optional[str] = None,
-        execution_details: Optional[Dict[str, Any]] = None,
-    ):
-        """
-        Log pipeline execution details to the database.
-
-        Args:
-            pipeline_stage: Name of the pipeline stage
-            execution_date: Date of execution
-            status: Execution status ('running', 'success', 'failed')
-            records_processed: Number of records processed (optional)
-            error_message: Error message if failed (optional)
-            execution_details: Additional execution details as JSON (optional)
-        """
-        import json
-
-        query = """
-        INSERT INTO pipeline_execution_log 
-        (pipeline_stage, execution_date, start_time, end_time, status, 
-         records_processed, error_message, execution_details)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (pipeline_stage, execution_date) DO UPDATE
-        SET end_time = EXCLUDED.end_time,
-            status = EXCLUDED.status,
-            records_processed = EXCLUDED.records_processed,
-            error_message = EXCLUDED.error_message,
-            execution_details = EXCLUDED.execution_details
-        """
-
-        now = datetime.now()
-        params = (
-            pipeline_stage,
-            execution_date,
-            now if status == "running" else None,
-            now if status in ["success", "failed"] else None,
-            status,
-            records_processed,
-            error_message,
-            json.dumps(execution_details) if execution_details else None,
-        )
-
-        try:
+            query = """
+                INSERT INTO prop_trading_model.pipeline_execution_log 
+                (pipeline_name, execution_date, status, execution_time_seconds, 
+                 records_processed, error_message)
+                VALUES (%(pipeline_name)s, %(execution_date)s, %(status)s, 
+                        %(execution_time_seconds)s, %(records_processed)s, %(error_message)s)
+            """
+            params = {
+                "pipeline_name": pipeline_name,
+                "execution_date": datetime.now(),
+                "status": status,
+                "execution_time_seconds": execution_time_seconds,
+                "records_processed": records_processed,
+                "error_message": error_message
+            }
             self.model_db.execute_command(query, params)
-            logger.info(f"Logged pipeline execution: {pipeline_stage} - {status}")
         except Exception as e:
-            logger.error(f"Failed to log pipeline execution: {str(e)}")
-
+            logger.error(f"Failed to log pipeline execution: {e}")
+    
     def close(self):
         """Close all database connections."""
         self.model_db.close()
         self.source_db.close()
+        logger.info("Database connections closed")
 
 
 # Singleton instance
@@ -327,7 +201,7 @@ _db_manager = None
 
 
 def get_db_manager() -> DatabaseManager:
-    """Get or create the database manager singleton."""
+    """Get or create the singleton database manager instance."""
     global _db_manager
     if _db_manager is None:
         _db_manager = DatabaseManager()
@@ -337,6 +211,79 @@ def get_db_manager() -> DatabaseManager:
 def close_db_connections():
     """Close all database connections."""
     global _db_manager
-    if _db_manager:
+    if _db_manager is not None:
         _db_manager.close()
         _db_manager = None
+
+
+# Utility functions for common operations
+def get_latest_date(table_name: str, date_column: Optional[str] = None) -> Optional[str]:
+    """Get the latest date from a table."""
+    if date_column is None:
+        date_column = "trade_date" if table_name in ["raw_trades_closed", "raw_trades_open"] else "date"
+    
+    db = get_db_manager().model_db
+    query = f"""
+        SELECT MAX({date_column})::text as max_date
+        FROM prop_trading_model.{table_name}
+        WHERE {date_column} IS NOT NULL
+    """
+    result = db.execute_query(query)
+    return result[0]["max_date"] if result and result[0]["max_date"] else None
+
+
+def execute_query(query: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """Execute a query using the model database."""
+    return get_db_manager().model_db.execute_query(query, params)
+
+
+def execute_query_df(query: str, params: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
+    """Execute a query and return DataFrame using the model database."""
+    return get_db_manager().model_db.execute_query_df(query, params)
+
+
+def read_sql(query: str, params: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
+    """Alias for execute_query_df for pandas compatibility."""
+    return execute_query_df(query, params)
+
+
+def to_sql(df: pd.DataFrame, table_name: str, schema: str = "prop_trading_model", 
+          if_exists: str = "append", index: bool = False) -> None:
+    """Write a DataFrame to a database table."""
+    db = get_db_manager().model_db
+    df.to_sql(
+        name=table_name,
+        con=db.engine,
+        schema=schema,
+        if_exists=if_exists,
+        index=index,
+        method="multi"
+    )
+
+
+# For testing
+if __name__ == "__main__":
+    print("Testing database connection...")
+    
+    # Get database manager
+    db_manager = get_db_manager()
+    
+    # Test query execution
+    result = db_manager.model_db.execute_query("SELECT version() as version")
+    print(f"PostgreSQL version: {result[0]['version']}")
+    
+    # Test table operations
+    tables = ["raw_metrics_daily", "raw_metrics_hourly", "raw_trades_closed"]
+    for table in tables:
+        if db_manager.model_db.table_exists(table):
+            count = db_manager.model_db.get_table_row_count(table)
+            latest = get_latest_date(table)
+            print(f"\n{table}:")
+            print(f"  Rows: {count:,}")
+            print(f"  Latest: {latest}")
+        else:
+            print(f"\n{table}: Does not exist")
+    
+    # Close connections
+    close_db_connections()
+    print("\n✅ Database connection working!")

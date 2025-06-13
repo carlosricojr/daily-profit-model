@@ -228,3 +228,9 @@ alpex-frontend/
 
 # MCP
 .mcp.json
+
+# Ignore node for supa
+node_modules/
+package-lock.json
+package.json
+.vscode/

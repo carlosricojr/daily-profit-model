@@ -733,7 +733,6 @@ name = "daily-profit-model"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "alembic" },
     { name = "apache-airflow" },
     { name = "apache-airflow-providers-postgres" },
     { name = "dash" },
@@ -750,7 +749,6 @@ dependencies = [
     { name = "plotly" },
     { name = "prometheus-client" },
     { name = "psutil" },
-    { name = "psycopg2-binary" },
     { name = "pydantic" },
     { name = "pyod" },
     { name = "requests" },
@@ -782,7 +780,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alembic", specifier = ">=1.16.1" },
     { name = "apache-airflow", specifier = ">=3.0.2" },
     { name = "apache-airflow-providers-postgres", specifier = ">=6.2.0" },
     { name = "dash", specifier = ">=2.8.0" },
@@ -799,14 +796,13 @@ requires-dist = [
     { name = "plotly", specifier = ">=5.12.0" },
     { name = "prometheus-client", specifier = ">=0.15.0" },
     { name = "psutil", specifier = ">=5.9.0" },
-    { name = "psycopg2-binary", specifier = ">=2.9.10" },
     { name = "pydantic", specifier = ">=1.10.0" },
     { name = "pyod", specifier = ">=1.0.0" },
     { name = "requests", specifier = ">=2.32.3" },
     { name = "scikit-learn", specifier = ">=1.6.1" },
     { name = "scipy", specifier = ">=1.10.0" },
     { name = "shap", specifier = ">=0.47.2" },
-    { name = "sqlalchemy", specifier = ">=1.4.0" },
+    { name = "sqlalchemy", specifier = ">=1.4.36,<2.0" },
     { name = "structlog", specifier = ">=22.3.0" },
     { name = "tqdm", specifier = ">=4.67.1" },
 ]

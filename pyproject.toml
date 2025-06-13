@@ -21,8 +21,7 @@ dependencies = [
     "optuna>=4.3.0",
     "shap>=0.47.2",
     # Database and data storage
-    "psycopg2-binary>=2.9.10",
-    "sqlalchemy>=1.4.0",
+    "sqlalchemy>=1.4.36,<2.0",
     # API and configuration
     "requests>=2.32.3",
     # Data validation and quality
@@ -41,10 +40,10 @@ dependencies = [
     "plotly>=5.12.0",
     "dash>=2.8.0",
     "dash-bootstrap-components>=1.2.0",
-    "matplotlib>=3.6.0", # Used for SHAP plots, confidence intervals, and lineage graphs
+    "matplotlib>=3.6.0",
+    # Workflow orchestration
     "apache-airflow>=3.0.2",
     "apache-airflow-providers-postgres>=6.2.0",
-    "alembic>=1.16.1",
 ]
 
 [project.urls]

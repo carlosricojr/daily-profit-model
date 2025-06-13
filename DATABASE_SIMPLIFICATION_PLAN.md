@@ -18,9 +18,21 @@ mv src/db_schema/auto_migrations/* archive/old_migrations/
 
 Supabase has its own migration system that works perfectly with your database:
 
+### For Ubuntu 24.04 (Recommended):
+
 ```bash
-# Install Supabase CLI
-brew install supabase/tap/supabase
+# Install Supabase CLI via npm (most reliable for Ubuntu)
+npm install -g supabase
+
+# Alternative: Install via the official script
+wget -qO- https://github.com/supabase/cli/releases/latest/download/supabase_linux_amd64.deb -O supabase.deb
+sudo dpkg -i supabase.deb
+
+# Alternative: Install via snap (if you prefer)
+sudo snap install supabase --classic
+
+# Verify installation
+supabase --version
 
 # Initialize Supabase in your project
 cd /home/carlos/trading/daily-profit-model
@@ -29,6 +41,12 @@ supabase init
 # Link to your existing Supabase project
 supabase link --project-ref yvwwaxmwbkkyepreillh
 ```
+
+### Note on Homebrew for Ubuntu:
+While you can install Homebrew on Ubuntu (`/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`), it's not the optimal approach for Ubuntu 24.04 because:
+- Native package managers (apt, dpkg, snap) are better integrated with Ubuntu
+- Homebrew adds an extra layer of complexity on Linux
+- The npm or direct .deb installation methods are more straightforward and reliable
 
 ## Step 3: Create One Clean Migration (15 minutes)
 
@@ -205,6 +223,93 @@ BEGIN
     RETURN true;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Function for intelligent partition cleanup (manual execution)
+CREATE OR REPLACE FUNCTION prop_trading_model.cleanup_unused_partitions(
+    parent_table text
+) RETURNS TABLE (
+    action text,
+    partition_name text,
+    row_count bigint,
+    reason text
+) AS $$
+DECLARE
+    partition_rec record;
+    oldest_data_date date;
+    newest_data_date date;
+    partition_date date;
+    current_row_count bigint;
+BEGIN
+    -- Find the actual data range for this table
+    EXECUTE format('
+        SELECT MIN(date), MAX(date) 
+        FROM prop_trading_model.%I 
+        WHERE date IS NOT NULL
+    ', parent_table) INTO oldest_data_date, newest_data_date;
+    
+    -- Return info if no data found
+    IF oldest_data_date IS NULL THEN
+        action := 'SKIP';
+        partition_name := parent_table;
+        row_count := 0;
+        reason := 'No data found in parent table';
+        RETURN NEXT;
+        RETURN;
+    END IF;
+    
+    -- Check each partition for this table
+    FOR partition_rec IN
+        SELECT tablename 
+        FROM pg_tables 
+        WHERE schemaname = 'prop_trading_model' 
+        AND tablename LIKE parent_table || '_20%'
+        AND tablename ~ '_20[0-9][0-9]_[0-9][0-9]$'
+        ORDER BY tablename
+    LOOP
+        -- Extract date from partition name (format: table_YYYY_MM)
+        partition_date := to_date(right(partition_rec.tablename, 7), 'YYYY_MM');
+        
+        -- Get row count for this partition
+        EXECUTE format('SELECT COUNT(*) FROM prop_trading_model.%I', partition_rec.tablename) 
+        INTO current_row_count;
+        
+        -- Determine action based on data range and content
+        IF partition_date < date_trunc('month', oldest_data_date) THEN
+            -- Partition is before our data range
+            IF current_row_count = 0 THEN
+                action := 'DROP';
+                reason := 'Empty partition before data range';
+            ELSE
+                action := 'KEEP';
+                reason := 'Non-empty partition (contains historical data)';
+            END IF;
+        ELSIF partition_date > date_trunc('month', newest_data_date + interval '1 month') THEN
+            -- Partition is after our data range
+            IF current_row_count = 0 THEN
+                action := 'DROP';
+                reason := 'Empty partition after data range';
+            ELSE
+                action := 'KEEP';
+                reason := 'Non-empty partition (contains future data)';
+            END IF;
+        ELSE
+            -- Partition is within our data range - always keep
+            action := 'KEEP';
+            IF current_row_count = 0 THEN
+                reason := 'Empty partition within data range (gap preservation)';
+            ELSE
+                reason := 'Active partition with data';
+            END IF;
+        END IF;
+        
+        -- Return the analysis
+        partition_name := partition_rec.tablename;
+        row_count := current_row_count;
+        RETURN NEXT;
+    END LOOP;
+    
+END;
+$$ LANGUAGE plpgsql;
 ```
 
 ### 5.2: Simple Python Wrapper
@@ -260,15 +365,96 @@ class DynamicPartitionManager:
                 "date_range": {"min": data.min_date, "max": data.max_date},
                 "needs_partitioning": data.rows > 100000  # 100k+ rows
             }
+    
+    def analyze_partition_cleanup(self, table_name: str) -> list:
+        """Analyze which partitions can be safely cleaned up."""
+        with self.engine.connect() as conn:
+            result = conn.execute(
+                text("SELECT * FROM prop_trading_model.cleanup_unused_partitions(:table)"),
+                {"table": table_name}
+            )
+            return [dict(row._mapping) for row in result.fetchall()]
+    
+    def get_partition_summary(self, table_name: str) -> dict:
+        """Get comprehensive partition summary."""
+        with self.engine.connect() as conn:
+            # Get partition info
+            result = conn.execute(text(f"""
+                SELECT 
+                    COUNT(*) as total_partitions,
+                    COUNT(*) FILTER (WHERE NOT EXISTS (
+                        SELECT 1 FROM prop_trading_model.{table_name}_*
+                        WHERE pg_class.relname = tablename
+                    )) as empty_partitions,
+                    MIN(to_date(right(tablename, 7), 'YYYY_MM')) as oldest_partition,
+                    MAX(to_date(right(tablename, 7), 'YYYY_MM')) as newest_partition
+                FROM pg_tables 
+                WHERE schemaname = 'prop_trading_model' 
+                AND tablename LIKE '{table_name}_%'
+                AND tablename ~ '_20[0-9][0-9]_[0-9][0-9]$'
+            """))
+            
+            partition_data = result.fetchone()
+            
+            # Get actual data range
+            result = conn.execute(text(f"""
+                SELECT MIN(date) as min_data, MAX(date) as max_data
+                FROM prop_trading_model.{table_name}
+            """))
+            
+            data_range = result.fetchone()
+            
+            return {
+                "table_name": table_name,
+                "partitions": {
+                    "total": partition_data.total_partitions,
+                    "empty": partition_data.empty_partitions,
+                    "oldest": partition_data.oldest_partition,
+                    "newest": partition_data.newest_partition
+                },
+                "data_range": {
+                    "min": data_range.min_data,
+                    "max": data_range.max_data
+                }
+            }
 
-# Usage
+# Usage Examples
 if __name__ == "__main__":
     pm = DynamicPartitionManager()
     
     # Ensure partitions for trading tables
     for table in ["raw_metrics_daily", "raw_metrics_hourly", "raw_trades_closed"]:
+        print(f"\n=== Processing {table} ===")
+        
+        # Get current state
+        summary = pm.get_partition_summary(table)
+        print(f"Current partitions: {summary['partitions']['total']}")
+        print(f"Data range: {summary['data_range']['min']} to {summary['data_range']['max']}")
+        
+        # Ensure future partitions
         count = pm.ensure_future_partitions(table, months_ahead=6)
-        print(f"✓ {table}: {count} partitions ready")
+        print(f"✓ Future partitions ensured: {count}")
+        
+        # Analyze cleanup opportunities
+        cleanup_analysis = pm.analyze_partition_cleanup(table)
+        
+        print("\nPartition cleanup analysis:")
+        for item in cleanup_analysis:
+            status = "🗑️" if item['action'] == 'DROP' else "✅"
+            print(f"  {status} {item['partition_name']}: {item['action']} - {item['reason']} ({item['row_count']} rows)")
+        
+        # Show which partitions would be dropped
+        to_drop = [item for item in cleanup_analysis if item['action'] == 'DROP']
+        if to_drop:
+            print(f"\n⚠️  {len(to_drop)} empty partitions outside data range could be cleaned up")
+        else:
+            print(f"\n✅ All partitions are needed (preserve data integrity)")
+
+    print("\n🎯 Intelligent cleanup preserves:")
+    print("   ✅ All non-empty partitions (regardless of age)")
+    print("   ✅ Empty partitions between oldest and newest data")
+    print("   ✅ Data integrity and continuity")
+    print("   🗑️ Only removes: Empty partitions outside actual data range")
 ```
 
 ## Step 6: Fix SQLAlchemy Models (20 minutes)
@@ -307,25 +493,68 @@ SELECT cron.schedule(
     $$
 );
 
--- Schedule monthly cleanup of old partitions (optional)
+-- Schedule monthly cleanup of truly unused partitions (intelligent cleanup)
 SELECT cron.schedule(
-    'cleanup-old-partitions',
+    'cleanup-unused-partitions',
     '0 2 1 * *',  -- First day of month at 2 AM
     $$
-    -- Drop partitions older than 2 years
+    -- Only drop partitions that are empty AND outside the data range
     DO $$
     DECLARE
-        partition_name text;
-        cutoff_date date := CURRENT_DATE - interval '2 years';
+        partition_rec record;
+        parent_table text;
+        oldest_data_date date;
+        newest_data_date date;
+        partition_date date;
+        row_count bigint;
     BEGIN
-        FOR partition_name IN
-            SELECT tablename FROM pg_tables 
+        -- Process each partitioned table
+        FOR parent_table IN
+            SELECT DISTINCT split_part(tablename, '_20', 1) as base_table
+            FROM pg_tables 
             WHERE schemaname = 'prop_trading_model' 
             AND tablename ~ '_20[0-9][0-9]_[0-9][0-9]$'
-            AND to_date(right(tablename, 7), 'YYYY_MM') < cutoff_date
         LOOP
-            EXECUTE 'DROP TABLE IF EXISTS prop_trading_model.' || partition_name;
-            RAISE NOTICE 'Dropped old partition: %', partition_name;
+            -- Find the actual data range for this table
+            EXECUTE format('
+                SELECT MIN(date), MAX(date) 
+                FROM prop_trading_model.%I 
+                WHERE date IS NOT NULL
+            ', parent_table) INTO oldest_data_date, newest_data_date;
+            
+            -- Skip if no data found
+            CONTINUE WHEN oldest_data_date IS NULL;
+            
+            -- Check each partition for this table
+            FOR partition_rec IN
+                SELECT tablename 
+                FROM pg_tables 
+                WHERE schemaname = 'prop_trading_model' 
+                AND tablename LIKE parent_table || '_20%'
+                AND tablename ~ '_20[0-9][0-9]_[0-9][0-9]$'
+            LOOP
+                -- Extract date from partition name (format: table_YYYY_MM)
+                partition_date := to_date(right(partition_rec.tablename, 7), 'YYYY_MM');
+                
+                -- Only consider partitions outside the data range
+                IF partition_date < date_trunc('month', oldest_data_date) OR 
+                   partition_date > date_trunc('month', newest_data_date + interval '1 month') THEN
+                   
+                    -- Check if partition is actually empty
+                    EXECUTE format('SELECT COUNT(*) FROM prop_trading_model.%I', partition_rec.tablename) 
+                    INTO row_count;
+                    
+                    -- Drop only if truly empty and outside data range
+                    IF row_count = 0 THEN
+                        EXECUTE format('DROP TABLE prop_trading_model.%I', partition_rec.tablename);
+                        RAISE NOTICE 'Dropped empty partition outside data range: %', partition_rec.tablename;
+                    ELSE
+                        RAISE NOTICE 'Keeping non-empty partition: % (% rows)', partition_rec.tablename, row_count;
+                    END IF;
+                END IF;
+            END LOOP;
+            
+            RAISE NOTICE 'Cleanup completed for %: data range % to %', parent_table, oldest_data_date, newest_data_date;
         END LOOP;
     END
     $$;
@@ -480,14 +709,94 @@ You now have:
 6. **Future-proof Design** creates partitions in advance and cleans up old ones
 7. **Battle-tested Patterns** based on Supabase's own partitioning recommendations
 
+## Advanced Features Preserved from partition_migration_manager.py
+
+Your existing partition migration manager has excellent features that are preserved in this approach:
+
+### ✅ **Zero-Downtime Conversion**
+```python
+# Your sophisticated table swapping logic is preserved
+def _swap_tables(self, conn, old_table: str, new_table: str):
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    # Atomic rename operations...
+```
+
+### ✅ **Intelligent Analysis**  
+```python
+# Table analysis logic moved to PostgreSQL functions
+def analyze_table_for_partitioning(self, table_name: str) -> Dict[str, Any]:
+    # Size analysis, date range detection, complexity estimation...
+```
+
+### ✅ **Progressive Data Migration**
+```python  
+# Month-by-month migration to avoid locks
+def _migrate_data_in_batches(self, conn, source_table, target_table...):
+    # Batched migration with performance monitoring...
+```
+
+### ✅ **Data Integrity Validation**
+```python
+# Checksum validation and row count verification  
+def _validate_migration(self, conn, source_table, target_table):
+    # MD5 checksums, row count verification...
+```
+
+The new approach **preserves all this sophistication** but moves the heavy lifting to PostgreSQL functions, making it:
+- **More reliable** (database-native operations)
+- **Easier to maintain** (no complex Python coordination)
+- **Better performing** (no network round-trips for partition operations)
+
+## Migration Path from Current System
+
+### Phase 1: Install the New Functions (Day 1)
+```bash
+# Add partition functions to your existing database
+psql $DB_CONNECTION_STRING_SESSION_POOLER -f partition_functions.sql
+
+# Test the functions work
+python -c "
+from src.utils.partitions import DynamicPartitionManager
+pm = DynamicPartitionManager()
+analysis = pm.analyze_table_for_partitioning('raw_metrics_hourly')
+print(f'Analysis: {analysis}')
+"
+```
+
+### Phase 2: Parallel Testing (Day 2-3)
+```bash
+# Test partition creation without affecting production
+SELECT prop_trading_model.create_monthly_partition('raw_metrics_daily', CURRENT_DATE);
+
+# Compare with existing partition_migration_manager
+python -c "
+from src.utils.partition_migration_manager import PartitionMigrationManager
+from src.utils.database import get_db_manager
+pm = PartitionMigrationManager(get_db_manager())
+result = pm.analyze_table_for_partitioning('raw_metrics_hourly')
+print('Current manager:', result)
+"
+```
+
+### Phase 3: Gradual Cutover (Day 4-5)
+```bash
+# Replace partition_migration_manager calls with new functions
+# Update run_pipeline.py to use new DynamicPartitionManager
+# Remove old schema managers one by one
+```
+
 ## Next Steps
 
-1. Delete the redundant files (5 min)
-2. Install Supabase CLI (5 min)
-3. Create initial migration (10 min)
-4. Generate accurate models (10 min)
-5. Test everything works (10 min)
-6. Delete this document and never look back! 😄
+1. **Install partition functions** (20 min) - Add to existing database
+2. **Test new partition system** (30 min) - Verify it works alongside current system  
+3. **Set up pg_cron automation** (15 min) - Schedule partition creation
+4. **Delete redundant schema managers** (10 min) - Remove 4 complex systems
+5. **Install Supabase CLI** (5 min) - Use npm or .deb package for Ubuntu
+6. **Generate accurate models** (10 min) - Use sqlacodegen
+7. **Update pipeline code** (20 min) - Switch to new partition manager
+8. **Deploy and monitor** (30 min) - Ensure everything works smoothly
+
+## Total Migration Time: ~2.5 hours (vs weeks of debugging current system)
 
 ## Questions?
 

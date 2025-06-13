@@ -1,396 +1,1047 @@
-"""
-SQLAlchemy Models for Trading System
+from typing import Optional
 
-These models provide:
-- Type safety for ML feature engineering
-- Sophisticated autogenerate capabilities
-- IDE support and static analysis
-- Relationship management
-- Data validation integration
-"""
+from sqlalchemy import ARRAY, Boolean, CheckConstraint, Date, DateTime, Double, Index, Integer, Numeric, PrimaryKeyConstraint, String, Text, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+import datetime
+import decimal
 
-from sqlalchemy import (
-    Column, Integer, String, Numeric, DateTime, Boolean, Text, 
-    ForeignKey, Index, CheckConstraint, UniqueConstraint,
-    TIMESTAMP, DECIMAL, VARCHAR, BIGINT
-)
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from datetime import datetime
-import uuid
-
-Base = declarative_base()
-
-# Set schema for all models
-Base.metadata.schema = "prop_trading_model"
+class Base(DeclarativeBase):
+    pass
 
 
-class RawMetricsAlltime(Base):
-    """All-time metrics for trading accounts."""
-    __tablename__ = "raw_metrics_alltime"
-    
-    account_id = Column(String(50), primary_key=True, nullable=False)
-    balance = Column(DECIMAL(15, 2), nullable=True)
-    equity = Column(DECIMAL(15, 2), nullable=True)
-    margin = Column(DECIMAL(15, 2), nullable=True)
-    free_margin = Column(DECIMAL(15, 2), nullable=True)
-    margin_level = Column(DECIMAL(8, 2), nullable=True)
-    profit = Column(DECIMAL(15, 2), nullable=True)
-    credit = Column(DECIMAL(15, 2), nullable=True)
-    currency = Column(String(10), nullable=True)
-    leverage = Column(Integer, nullable=True)
-    trades_count = Column(Integer, nullable=True)
-    success_rate = Column(DECIMAL(5, 2), nullable=True)
-    profit_factor = Column(DECIMAL(8, 4), nullable=True)
-    expected_payoff = Column(DECIMAL(15, 2), nullable=True)
-    sharpe_ratio = Column(DECIMAL(8, 4), nullable=True)
-    recovery_factor = Column(DECIMAL(8, 4), nullable=True)
-    max_drawdown = Column(DECIMAL(15, 2), nullable=True)
-    max_drawdown_percent = Column(DECIMAL(5, 2), nullable=True)
-    average_win = Column(DECIMAL(15, 2), nullable=True)
-    average_loss = Column(DECIMAL(15, 2), nullable=True)
-    largest_win = Column(DECIMAL(15, 2), nullable=True)
-    largest_loss = Column(DECIMAL(15, 2), nullable=True)
-    consecutive_wins = Column(Integer, nullable=True)
-    consecutive_losses = Column(Integer, nullable=True)
-    max_consecutive_wins = Column(Integer, nullable=True)
-    max_consecutive_losses = Column(Integer, nullable=True)
-    total_trades = Column(Integer, nullable=True)
-    winning_trades = Column(Integer, nullable=True)
-    losing_trades = Column(Integer, nullable=True)
-    last_updated = Column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
-    
-    # Constraints
+class FeatureStoreAccountDaily(Base):
+    __tablename__ = 'feature_store_account_daily'
     __table_args__ = (
-        CheckConstraint('balance >= 0', name='chk_balance_positive'),
-        CheckConstraint('success_rate >= 0 AND success_rate <= 100', name='chk_success_rate_range'),
-        CheckConstraint('leverage > 0', name='chk_leverage_positive'),
-        Index('idx_raw_metrics_alltime_last_updated', 'last_updated'),
-        Index('idx_raw_metrics_alltime_balance', 'balance'),
+        PrimaryKeyConstraint('id', name='feature_store_account_daily_pkey'),
+        UniqueConstraint('account_id', 'feature_date', name='feature_store_account_daily_account_id_feature_date_key'),
+        Index('idx_feature_store_account_date', 'account_id', 'feature_date'),
+        Index('idx_feature_store_date', 'feature_date'),
+        {'schema': 'prop_trading_model'}
     )
 
-
-class RawMetricsDaily(Base):
-    """Daily metrics for trading accounts."""
-    __tablename__ = "raw_metrics_daily"
-    
-    account_id = Column(String(50), primary_key=True, nullable=False)
-    date = Column(DateTime, primary_key=True, nullable=False)
-    balance = Column(DECIMAL(15, 2), nullable=True)
-    equity = Column(DECIMAL(15, 2), nullable=True)
-    margin = Column(DECIMAL(15, 2), nullable=True)
-    free_margin = Column(DECIMAL(15, 2), nullable=True)
-    margin_level = Column(DECIMAL(8, 2), nullable=True)
-    profit = Column(DECIMAL(15, 2), nullable=True)
-    daily_profit = Column(DECIMAL(15, 2), nullable=True)
-    daily_profit_percent = Column(DECIMAL(8, 4), nullable=True)
-    trades_count = Column(Integer, nullable=True)
-    open_positions = Column(Integer, nullable=True)
-    last_updated = Column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
-    
-    # Constraints and indexes
-    __table_args__ = (
-        CheckConstraint('balance >= 0', name='chk_daily_balance_positive'),
-        CheckConstraint('open_positions >= 0', name='chk_open_positions_non_negative'),
-        Index('idx_raw_metrics_daily_date', 'date'),
-        Index('idx_raw_metrics_daily_account_date', 'account_id', 'date'),
-        Index('idx_raw_metrics_daily_last_updated', 'last_updated'),
-    )
-
-
-class RawMetricsHourly(Base):
-    """Hourly metrics for trading accounts."""
-    __tablename__ = "raw_metrics_hourly"
-    
-    account_id = Column(String(50), primary_key=True, nullable=False)
-    datetime = Column(TIMESTAMP(timezone=True), primary_key=True, nullable=False)
-    balance = Column(DECIMAL(15, 2), nullable=True)
-    equity = Column(DECIMAL(15, 2), nullable=True)
-    margin = Column(DECIMAL(15, 2), nullable=True)
-    free_margin = Column(DECIMAL(15, 2), nullable=True)
-    margin_level = Column(DECIMAL(8, 2), nullable=True)
-    profit = Column(DECIMAL(15, 2), nullable=True)
-    hourly_profit = Column(DECIMAL(15, 2), nullable=True)
-    hourly_profit_percent = Column(DECIMAL(8, 4), nullable=True)
-    trades_count = Column(Integer, nullable=True)
-    open_positions = Column(Integer, nullable=True)
-    last_updated = Column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
-    
-    # Primary key
-    __table_args__ = (
-        {'primary_key': [account_id, datetime]},
-        CheckConstraint('balance >= 0', name='chk_hourly_balance_positive'),
-        CheckConstraint('open_positions >= 0', name='chk_hourly_open_positions_non_negative'),
-        Index('idx_raw_metrics_hourly_datetime', 'datetime'),
-        Index('idx_raw_metrics_hourly_account_datetime', 'account_id', 'datetime'),
-        Index('idx_raw_metrics_hourly_last_updated', 'last_updated'),
-    )
-
-
-class RawTradesClosed(Base):
-    """Closed trades data."""
-    __tablename__ = "raw_trades_closed"
-    
-    account_id = Column(String(50), primary_key=True, nullable=False)
-    ticket = Column(BIGINT, primary_key=True, nullable=False)
-    symbol = Column(String(20), nullable=True)
-    type = Column(String(10), nullable=True)
-    volume = Column(DECIMAL(10, 2), nullable=True)
-    open_time = Column(TIMESTAMP(timezone=True), nullable=True)
-    close_time = Column(TIMESTAMP(timezone=True), nullable=True)
-    open_price = Column(DECIMAL(10, 5), nullable=True)
-    close_price = Column(DECIMAL(10, 5), nullable=True)
-    profit = Column(DECIMAL(15, 2), nullable=True)
-    commission = Column(DECIMAL(15, 2), nullable=True)
-    swap = Column(DECIMAL(15, 2), nullable=True)
-    comment = Column(Text, nullable=True)
-    magic_number = Column(Integer, nullable=True)
-    last_updated = Column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
-    
-    # Constraints and indexes
-    __table_args__ = (
-        CheckConstraint('volume > 0', name='chk_volume_positive'),
-        CheckConstraint('open_time <= close_time', name='chk_time_order'),
-        Index('idx_raw_trades_closed_symbol', 'symbol'),
-        Index('idx_raw_trades_closed_close_time', 'close_time'),
-        Index('idx_raw_trades_closed_account_close_time', 'account_id', 'close_time'),
-        Index('idx_raw_trades_closed_profit', 'profit'),
-    )
-
-
-class RawTradesOpen(Base):
-    """Open trades data."""
-    __tablename__ = "raw_trades_open"
-    
-    account_id = Column(String(50), primary_key=True, nullable=False)
-    ticket = Column(BIGINT, primary_key=True, nullable=False)
-    symbol = Column(String(20), nullable=True)
-    type = Column(String(10), nullable=True)
-    volume = Column(DECIMAL(10, 2), nullable=True)
-    open_time = Column(TIMESTAMP(timezone=True), nullable=True)
-    open_price = Column(DECIMAL(10, 5), nullable=True)
-    current_price = Column(DECIMAL(10, 5), nullable=True)
-    profit = Column(DECIMAL(15, 2), nullable=True)
-    commission = Column(DECIMAL(15, 2), nullable=True)
-    swap = Column(DECIMAL(15, 2), nullable=True)
-    comment = Column(Text, nullable=True)
-    magic_number = Column(Integer, nullable=True)
-    last_updated = Column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
-    
-    # Constraints and indexes
-    __table_args__ = (
-        CheckConstraint('volume > 0', name='chk_open_volume_positive'),
-        Index('idx_raw_trades_open_symbol', 'symbol'),
-        Index('idx_raw_trades_open_open_time', 'open_time'),
-        Index('idx_raw_trades_open_account_open_time', 'account_id', 'open_time'),
-        Index('idx_raw_trades_open_profit', 'profit'),
-    )
-
-
-class MarketRegimes(Base):
-    """Market regime data for ML features."""
-    __tablename__ = "market_regimes"
-    
-    date = Column(DateTime, primary_key=True, nullable=False)
-    regime_type = Column(String(20), nullable=True)
-    volatility_regime = Column(String(20), nullable=True)
-    trend_strength = Column(DECIMAL(5, 4), nullable=True)
-    market_stress = Column(DECIMAL(5, 4), nullable=True)
-    correlation_regime = Column(String(20), nullable=True)
-    regime_confidence = Column(DECIMAL(5, 4), nullable=True)
-    regime_features = Column(JSONB, nullable=True)
-    last_updated = Column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
-    
-    __table_args__ = (
-        CheckConstraint('trend_strength >= 0 AND trend_strength <= 1', name='chk_trend_strength_range'),
-        CheckConstraint('market_stress >= 0 AND market_stress <= 1', name='chk_market_stress_range'),
-        CheckConstraint('regime_confidence >= 0 AND regime_confidence <= 1', name='chk_regime_confidence_range'),
-        Index('idx_market_regimes_regime_type', 'regime_type'),
-        Index('idx_market_regimes_date', 'date'),
-    )
-
-
-class TradingPlans(Base):
-    """Trading plans and strategies."""
-    __tablename__ = "trading_plans"
-    
-    plan_id = Column(String(50), primary_key=True, nullable=False)
-    plan_name = Column(String(100), nullable=False)
-    strategy_type = Column(String(50), nullable=True)
-    risk_level = Column(String(20), nullable=True)
-    max_drawdown_limit = Column(DECIMAL(5, 2), nullable=True)
-    target_return = Column(DECIMAL(5, 2), nullable=True)
-    active = Column(Boolean, nullable=False, default=True)
-    created_date = Column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
-    last_updated = Column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
-    
-    __table_args__ = (
-        CheckConstraint('max_drawdown_limit >= 0 AND max_drawdown_limit <= 100', name='chk_max_drawdown_range'),
-        CheckConstraint('target_return >= 0', name='chk_target_return_positive'),
-        Index('idx_trading_plans_active', 'active'),
-        Index('idx_trading_plans_strategy_type', 'strategy_type'),
-    )
-
-
-class FeaturesEngineered(Base):
-    """Engineered features for ML models."""
-    __tablename__ = "features_engineered"
-    
-    account_id = Column(String(50), primary_key=True, nullable=False)
-    feature_date = Column(DateTime, primary_key=True, nullable=False)
-    feature_version = Column(String(20), primary_key=True, nullable=False, default='v1.0')
-    
-    # Performance features
-    rolling_return_7d = Column(DECIMAL(8, 4), nullable=True)
-    rolling_return_30d = Column(DECIMAL(8, 4), nullable=True)
-    rolling_volatility_7d = Column(DECIMAL(8, 4), nullable=True)
-    rolling_volatility_30d = Column(DECIMAL(8, 4), nullable=True)
-    sharpe_ratio_30d = Column(DECIMAL(8, 4), nullable=True)
-    max_drawdown_30d = Column(DECIMAL(8, 4), nullable=True)
-    
-    # Risk features
-    var_95_7d = Column(DECIMAL(15, 2), nullable=True)
-    var_99_7d = Column(DECIMAL(15, 2), nullable=True)
-    expected_shortfall_95_7d = Column(DECIMAL(15, 2), nullable=True)
-    
-    # Behavioral features
-    avg_trade_duration_hours = Column(DECIMAL(8, 2), nullable=True)
-    trade_frequency_daily = Column(DECIMAL(6, 2), nullable=True)
-    win_loss_ratio = Column(DECIMAL(8, 4), nullable=True)
-    profit_factor_30d = Column(DECIMAL(8, 4), nullable=True)
-    
-    # Market regime interaction
-    regime_performance_bull = Column(DECIMAL(8, 4), nullable=True)
-    regime_performance_bear = Column(DECIMAL(8, 4), nullable=True)
-    regime_performance_sideways = Column(DECIMAL(8, 4), nullable=True)
-    
-    # Time-based features
-    hour_of_day = Column(Integer, nullable=True)
-    day_of_week = Column(Integer, nullable=True)
-    day_of_month = Column(Integer, nullable=True)
-    month_of_year = Column(Integer, nullable=True)
-    
-    # Target variables (for ML)
-    target_return_1d = Column(DECIMAL(8, 4), nullable=True)
-    target_return_7d = Column(DECIMAL(8, 4), nullable=True)
-    target_return_30d = Column(DECIMAL(8, 4), nullable=True)
-    target_risk_adjusted_return_7d = Column(DECIMAL(8, 4), nullable=True)
-    
-    # Metadata
-    feature_hash = Column(String(64), nullable=True)  # For version control
-    created_at = Column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
-    last_updated = Column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
-    
-    # Constraints and indexes
-    __table_args__ = (
-        CheckConstraint('hour_of_day >= 0 AND hour_of_day <= 23', name='chk_hour_range'),
-        CheckConstraint('day_of_week >= 1 AND day_of_week <= 7', name='chk_day_of_week_range'),
-        CheckConstraint('day_of_month >= 1 AND day_of_month <= 31', name='chk_day_of_month_range'),
-        CheckConstraint('month_of_year >= 1 AND month_of_year <= 12', name='chk_month_range'),
-        Index('idx_features_engineered_feature_date', 'feature_date'),
-        Index('idx_features_engineered_account_date', 'account_id', 'feature_date'),
-        Index('idx_features_engineered_version', 'feature_version'),
-        Index('idx_features_engineered_hash', 'feature_hash'),
-    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[str] = mapped_column(String(255))
+    login: Mapped[str] = mapped_column(String(255))
+    feature_date: Mapped[datetime.date] = mapped_column(Date)
+    days_active: Mapped[Optional[int]] = mapped_column(Integer)
+    current_phase: Mapped[Optional[str]] = mapped_column(String(50))
+    account_age_days: Mapped[Optional[int]] = mapped_column(Integer)
+    trades_today: Mapped[Optional[int]] = mapped_column(Integer, server_default=text('0'))
+    trades_last_7d: Mapped[Optional[int]] = mapped_column(Integer, server_default=text('0'))
+    trades_last_30d: Mapped[Optional[int]] = mapped_column(Integer, server_default=text('0'))
+    trading_days_last_7d: Mapped[Optional[int]] = mapped_column(Integer, server_default=text('0'))
+    trading_days_last_30d: Mapped[Optional[int]] = mapped_column(Integer, server_default=text('0'))
+    avg_trades_per_day_7d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 4))
+    avg_trades_per_day_30d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 4))
+    profit_today: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_last_7d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_last_30d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    roi_today: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 4))
+    roi_last_7d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 4))
+    roi_last_30d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 4))
+    win_rate_today: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    win_rate_7d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    win_rate_30d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    profit_factor_7d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    profit_factor_30d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    max_drawdown_7d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_drawdown_30d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    current_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    current_drawdown_pct: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    avg_trade_size_7d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 4))
+    avg_trade_size_30d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 4))
+    avg_holding_time_hours_7d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    avg_holding_time_hours_30d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    unique_symbols_7d: Mapped[Optional[int]] = mapped_column(Integer)
+    unique_symbols_30d: Mapped[Optional[int]] = mapped_column(Integer)
+    symbol_concentration_7d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    symbol_concentration_30d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    pct_trades_market_hours_7d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    pct_trades_market_hours_30d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    favorite_trading_hour_7d: Mapped[Optional[int]] = mapped_column(Integer)
+    favorite_trading_hour_30d: Mapped[Optional[int]] = mapped_column(Integer)
+    daily_profit_volatility_7d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    daily_profit_volatility_30d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profitable_days_pct_7d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    profitable_days_pct_30d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    distance_to_profit_target: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    distance_to_profit_target_pct: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    distance_to_drawdown_limit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    distance_to_drawdown_limit_pct: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    days_until_deadline: Mapped[Optional[int]] = mapped_column(Integer)
+    market_volatility_regime: Mapped[Optional[str]] = mapped_column(String(50))
+    market_trend_regime: Mapped[Optional[str]] = mapped_column(String(50))
+    next_day_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
 
 
 class ModelPredictions(Base):
-    """ML model predictions storage."""
-    __tablename__ = "model_predictions"
-    
-    prediction_id = Column(String(50), primary_key=True, default=lambda: str(uuid.uuid4()))
-    account_id = Column(String(50), nullable=False)
-    model_name = Column(String(100), nullable=False)
-    model_version = Column(String(20), nullable=False)
-    prediction_date = Column(TIMESTAMP(timezone=True), nullable=False)
-    feature_date = Column(DateTime, nullable=False)
-    
-    # Predictions
-    predicted_return_1d = Column(DECIMAL(8, 4), nullable=True)
-    predicted_return_7d = Column(DECIMAL(8, 4), nullable=True)
-    predicted_return_30d = Column(DECIMAL(8, 4), nullable=True)
-    predicted_risk_score = Column(DECIMAL(5, 4), nullable=True)
-    prediction_confidence = Column(DECIMAL(5, 4), nullable=True)
-    
-    # Model metadata
-    feature_importance = Column(JSONB, nullable=True)
-    model_metrics = Column(JSONB, nullable=True)
-    
-    # Validation
-    actual_return_1d = Column(DECIMAL(8, 4), nullable=True)
-    actual_return_7d = Column(DECIMAL(8, 4), nullable=True)
-    actual_return_30d = Column(DECIMAL(8, 4), nullable=True)
-    prediction_error_1d = Column(DECIMAL(8, 4), nullable=True)
-    prediction_error_7d = Column(DECIMAL(8, 4), nullable=True)
-    prediction_error_30d = Column(DECIMAL(8, 4), nullable=True)
-    
-    created_at = Column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
-    last_updated = Column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
-    
+    __tablename__ = 'model_predictions'
     __table_args__ = (
-        CheckConstraint('predicted_risk_score >= 0 AND predicted_risk_score <= 1', name='chk_risk_score_range'),
-        CheckConstraint('prediction_confidence >= 0 AND prediction_confidence <= 1', name='chk_confidence_range'),
-        Index('idx_model_predictions_account_id', 'account_id'),
-        Index('idx_model_predictions_model', 'model_name', 'model_version'),
-        Index('idx_model_predictions_prediction_date', 'prediction_date'),
-        Index('idx_model_predictions_feature_date', 'feature_date'),
+        PrimaryKeyConstraint('id', name='model_predictions_pkey'),
+        UniqueConstraint('model_version', 'prediction_date', 'account_id', name='model_predictions_model_version_prediction_date_account_id_key'),
+        Index('idx_model_predictions_account', 'account_id', 'prediction_date'),
+        Index('idx_model_predictions_date', 'prediction_date'),
+        {'schema': 'prop_trading_model'}
     )
 
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    model_version: Mapped[str] = mapped_column(String(100))
+    prediction_date: Mapped[datetime.date] = mapped_column(Date)
+    account_id: Mapped[str] = mapped_column(String(255))
+    predicted_profit_probability: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 4))
+    predicted_profit_amount: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    feature_importance: Mapped[Optional[dict]] = mapped_column(JSONB)
+    prediction_confidence: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 4))
+    actual_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
 
-# Relationships (for ORM usage)
-# Note: These are optional but useful for complex queries
 
-# Add foreign key relationships if needed
-# Example:
-# RawMetricsDaily.account = relationship("RawMetricsAlltime", 
-#                                       foreign_keys=[RawMetricsDaily.account_id],
-#                                       primaryjoin="RawMetricsDaily.account_id == RawMetricsAlltime.account_id")
-
-
-# Materialized views (represented as tables for SQLAlchemy)
-class AccountPerformanceSummary(Base):
-    """Materialized view for account performance summary."""
-    __tablename__ = "account_performance_summary"
-    
-    account_id = Column(String(50), primary_key=True, nullable=False)
-    total_trades = Column(Integer, nullable=True)
-    total_profit = Column(DECIMAL(15, 2), nullable=True)
-    success_rate = Column(DECIMAL(5, 2), nullable=True)
-    avg_monthly_return = Column(DECIMAL(8, 4), nullable=True)
-    max_drawdown = Column(DECIMAL(15, 2), nullable=True)
-    sharpe_ratio = Column(DECIMAL(8, 4), nullable=True)
-    profit_factor = Column(DECIMAL(8, 4), nullable=True)
-    last_trade_date = Column(DateTime, nullable=True)
-    account_age_days = Column(Integer, nullable=True)
-    risk_score = Column(DECIMAL(5, 4), nullable=True)
-    performance_rank = Column(Integer, nullable=True)
-    last_updated = Column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
-    
+class ModelRegistry(Base):
+    __tablename__ = 'model_registry'
     __table_args__ = (
-        Index('idx_account_performance_summary_success_rate', 'success_rate'),
-        Index('idx_account_performance_summary_sharpe_ratio', 'sharpe_ratio'),
-        Index('idx_account_performance_summary_performance_rank', 'performance_rank'),
+        PrimaryKeyConstraint('id', name='model_registry_pkey'),
+        UniqueConstraint('model_version', name='model_registry_model_version_key'),
+        {'schema': 'prop_trading_model'}
     )
 
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    model_version: Mapped[str] = mapped_column(String(100))
+    model_type: Mapped[str] = mapped_column(String(50))
+    training_completed_at: Mapped[datetime.datetime] = mapped_column(DateTime)
+    model_path: Mapped[Optional[str]] = mapped_column(String(500))
+    git_commit_hash: Mapped[Optional[str]] = mapped_column(String(100))
+    performance_metrics: Mapped[Optional[dict]] = mapped_column(JSONB)
+    feature_importance: Mapped[Optional[dict]] = mapped_column(JSONB)
+    is_active: Mapped[Optional[bool]] = mapped_column(Boolean, server_default=text('false'))
+    deployed_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    deprecated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
 
-class DailyMarketSummary(Base):
-    """Materialized view for daily market summary."""
-    __tablename__ = "daily_market_summary"
-    
-    date = Column(DateTime, primary_key=True, nullable=False)
-    total_accounts = Column(Integer, nullable=True)
-    active_accounts = Column(Integer, nullable=True)
-    total_trades = Column(Integer, nullable=True)
-    total_volume = Column(DECIMAL(15, 2), nullable=True)
-    avg_daily_return = Column(DECIMAL(8, 4), nullable=True)
-    market_volatility = Column(DECIMAL(8, 4), nullable=True)
-    top_performing_accounts = Column(Integer, nullable=True)
-    worst_performing_accounts = Column(Integer, nullable=True)
-    regime_type = Column(String(20), nullable=True)
-    last_updated = Column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
-    
+
+class ModelTrainingInput(Base):
+    __tablename__ = 'model_training_input'
     __table_args__ = (
-        Index('idx_daily_market_summary_date', 'date'),
-        Index('idx_daily_market_summary_regime_type', 'regime_type'),
-    ) 
+        PrimaryKeyConstraint('id', name='model_training_input_pkey'),
+        UniqueConstraint('account_id', 'prediction_date', name='model_training_input_account_id_prediction_date_key'),
+        {'schema': 'prop_trading_model'}
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[str] = mapped_column(String(255))
+    login: Mapped[str] = mapped_column(String(255))
+    prediction_date: Mapped[datetime.date] = mapped_column(Date)
+    feature_date: Mapped[datetime.date] = mapped_column(Date)
+    starting_balance: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_daily_drawdown_pct: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    max_drawdown_pct: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    profit_target_pct: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    max_leverage: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    is_drawdown_relative: Mapped[Optional[bool]] = mapped_column(Boolean)
+    current_balance: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    current_equity: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    days_since_first_trade: Mapped[Optional[int]] = mapped_column(Integer)
+    active_trading_days_count: Mapped[Optional[int]] = mapped_column(Integer)
+    distance_to_profit_target: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    distance_to_max_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    open_pnl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    open_positions_volume: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_sum_1d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_avg_1d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_std_1d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_sum_3d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_avg_3d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_std_3d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_min_3d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_max_3d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    win_rate_3d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    rolling_pnl_sum_5d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_avg_5d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_std_5d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_min_5d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_max_5d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    win_rate_5d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    profit_factor_5d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 4))
+    sharpe_ratio_5d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 4))
+    rolling_pnl_sum_10d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_avg_10d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_std_10d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_min_10d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_max_10d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    win_rate_10d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    profit_factor_10d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 4))
+    sharpe_ratio_10d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 4))
+    rolling_pnl_sum_20d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_avg_20d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    rolling_pnl_std_20d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    win_rate_20d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    profit_factor_20d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 4))
+    sharpe_ratio_20d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 4))
+    trades_count_5d: Mapped[Optional[int]] = mapped_column(Integer)
+    avg_trade_duration_5d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    avg_lots_per_trade_5d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 4))
+    avg_volume_per_trade_5d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    stop_loss_usage_rate_5d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    take_profit_usage_rate_5d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    buy_sell_ratio_5d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 4))
+    top_symbol_concentration_5d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    market_sentiment_score: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 4))
+    market_volatility_regime: Mapped[Optional[str]] = mapped_column(String(50))
+    market_liquidity_state: Mapped[Optional[str]] = mapped_column(String(50))
+    vix_level: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    dxy_level: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    sp500_daily_return: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 4))
+    btc_volatility_90d: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 4))
+    fed_funds_rate: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    day_of_week: Mapped[Optional[int]] = mapped_column(Integer)
+    week_of_month: Mapped[Optional[int]] = mapped_column(Integer)
+    month: Mapped[Optional[int]] = mapped_column(Integer)
+    quarter: Mapped[Optional[int]] = mapped_column(Integer)
+    day_of_year: Mapped[Optional[int]] = mapped_column(Integer)
+    is_month_start: Mapped[Optional[bool]] = mapped_column(Boolean)
+    is_month_end: Mapped[Optional[bool]] = mapped_column(Boolean)
+    is_quarter_start: Mapped[Optional[bool]] = mapped_column(Boolean)
+    is_quarter_end: Mapped[Optional[bool]] = mapped_column(Boolean)
+    target_net_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+
+
+class PipelineExecutionLog(Base):
+    __tablename__ = 'pipeline_execution_log'
+    __table_args__ = (
+        CheckConstraint("status::text = ANY (ARRAY['running'::character varying, 'success'::character varying, 'failed'::character varying, 'warning'::character varying]::text[])", name='pipeline_execution_log_status_check'),
+        PrimaryKeyConstraint('id', name='pipeline_execution_log_pkey'),
+        Index('idx_pipeline_execution_stage_date', 'pipeline_stage', 'execution_date'),
+        Index('idx_pipeline_execution_status', 'status', 'created_at'),
+        {'schema': 'prop_trading_model'}
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    pipeline_stage: Mapped[str] = mapped_column(String(100))
+    execution_date: Mapped[datetime.date] = mapped_column(Date)
+    start_time: Mapped[datetime.datetime] = mapped_column(DateTime)
+    end_time: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    status: Mapped[Optional[str]] = mapped_column(String(50))
+    records_processed: Mapped[Optional[int]] = mapped_column(Integer)
+    records_failed: Mapped[Optional[int]] = mapped_column(Integer)
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+    execution_details: Mapped[Optional[dict]] = mapped_column(JSONB)
+    created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+
+
+class QueryPerformanceLog(Base):
+    __tablename__ = 'query_performance_log'
+    __table_args__ = (
+        PrimaryKeyConstraint('id', name='query_performance_log_pkey'),
+        {'schema': 'prop_trading_model'}
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    query_hash: Mapped[Optional[str]] = mapped_column(String(64))
+    query_template: Mapped[Optional[str]] = mapped_column(Text)
+    execution_time_ms: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    rows_returned: Mapped[Optional[int]] = mapped_column(Integer)
+    table_names: Mapped[Optional[list]] = mapped_column(ARRAY(Text()))
+    index_used: Mapped[Optional[bool]] = mapped_column(Boolean)
+    created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+
+
+class RawMetricsAlltime(Base):
+    __tablename__ = 'raw_metrics_alltime'
+    __table_args__ = (
+        CheckConstraint('gross_loss <= 0::numeric', name='raw_metrics_alltime_gross_loss_check'),
+        CheckConstraint('gross_profit >= 0::numeric', name='raw_metrics_alltime_gross_profit_check'),
+        CheckConstraint('num_trades >= 0', name='raw_metrics_alltime_num_trades_check'),
+        CheckConstraint('phase = ANY (ARRAY[1, 2, 3, 4])', name='raw_metrics_alltime_phase_check'),
+        CheckConstraint('profit_factor >= 0::numeric', name='raw_metrics_alltime_profit_factor_check'),
+        CheckConstraint('status = ANY (ARRAY[1, 2, 3])', name='raw_metrics_alltime_status_check'),
+        CheckConstraint('success_rate >= 0::numeric AND success_rate <= 100::numeric', name='raw_metrics_alltime_success_rate_check'),
+        PrimaryKeyConstraint('account_id', name='raw_metrics_alltime_pkey'),
+        Index('idx_raw_metrics_alltime_account_id', 'account_id'),
+        Index('idx_raw_metrics_alltime_login', 'login'),
+        Index('idx_raw_metrics_alltime_login_platform_broker', 'login', 'platform', 'broker'),
+        Index('idx_raw_metrics_alltime_plan_id', 'plan_id'),
+        Index('idx_raw_metrics_alltime_trader_id', 'trader_id'),
+        {'schema': 'prop_trading_model'}
+    )
+
+    login: Mapped[str] = mapped_column(String(255))
+    account_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    plan_id: Mapped[Optional[str]] = mapped_column(String(255))
+    trader_id: Mapped[Optional[str]] = mapped_column(String(255))
+    status: Mapped[Optional[int]] = mapped_column(Integer)
+    type: Mapped[Optional[int]] = mapped_column(Integer)
+    phase: Mapped[Optional[int]] = mapped_column(Integer)
+    broker: Mapped[Optional[int]] = mapped_column(Integer)
+    platform: Mapped[Optional[int]] = mapped_column(Integer)
+    price_stream: Mapped[Optional[int]] = mapped_column(Integer)
+    country: Mapped[Optional[str]] = mapped_column(String(2))
+    approved_payouts: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    pending_payouts: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    starting_balance: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    prior_days_balance: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    prior_days_equity: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    current_balance: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    current_equity: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    first_trade_date: Mapped[Optional[datetime.date]] = mapped_column(Date)
+    days_since_initial_deposit: Mapped[Optional[int]] = mapped_column(Integer)
+    days_since_first_trade: Mapped[Optional[int]] = mapped_column(Integer)
+    num_trades: Mapped[Optional[int]] = mapped_column(Integer)
+    first_trade_open: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    last_trade_open: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    last_trade_close: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    lifetime_in_days: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    net_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    gross_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    gross_loss: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    gain_to_pain: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    profit_factor: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    success_rate: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    expectancy: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    std_profits: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    risk_adj_profit: Mapped[Optional[float]] = mapped_column(Double(53))
+    min_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_perc_10: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_perc_25: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_perc_75: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_perc_90: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_top_10_prcnt_trades: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_bottom_10_prcnt_trades: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    top_10_prcnt_profit_contrib: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    bottom_10_prcnt_loss_contrib: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    one_std_outlier_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    one_std_outlier_profit_contrib: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    two_std_outlier_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    two_std_outlier_profit_contrib: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    net_profit_per_usd_volume: Mapped[Optional[float]] = mapped_column(Double(53))
+    gross_profit_per_usd_volume: Mapped[Optional[float]] = mapped_column(Double(53))
+    gross_loss_per_usd_volume: Mapped[Optional[float]] = mapped_column(Double(53))
+    distance_gross_profit_loss_per_usd_volume: Mapped[Optional[float]] = mapped_column(Double(53))
+    multiple_gross_profit_loss_per_usd_volume: Mapped[Optional[float]] = mapped_column(Double(53))
+    gross_profit_per_lot: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    gross_loss_per_lot: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    distance_gross_profit_loss_per_lot: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    multiple_gross_profit_loss_per_lot: Mapped[Optional[float]] = mapped_column(Double(53))
+    net_profit_per_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    gross_profit_per_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    gross_loss_per_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    mean_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    std_rets: Mapped[Optional[float]] = mapped_column(Double(53))
+    risk_adj_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    downside_std_rets: Mapped[Optional[float]] = mapped_column(Double(53))
+    downside_risk_adj_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    total_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    daily_mean_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    daily_std_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    daily_sharpe: Mapped[Optional[float]] = mapped_column(Double(53))
+    daily_downside_std_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    daily_sortino: Mapped[Optional[float]] = mapped_column(Double(53))
+    rel_net_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_gross_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_gross_loss: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_mean_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_median_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_std_profits: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_risk_adj_profit: Mapped[Optional[float]] = mapped_column(Double(53))
+    rel_min_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_max_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_perc_10: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_perc_25: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_perc_75: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_perc_90: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_top_10_prcnt_trades: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_bottom_10_prcnt_trades: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_one_std_outlier_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_two_std_outlier_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    mean_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_num_trades_in_dd: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_num_trades_in_dd: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_num_trades_in_dd: Mapped[Optional[int]] = mapped_column(Integer)
+    rel_mean_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_median_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_max_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    total_lots: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    total_volume: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    std_volumes: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_winning_lot: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    mean_losing_lot: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    distance_win_loss_lots: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    multiple_win_loss_lots: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_winning_volume: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_losing_volume: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    distance_win_loss_volume: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    multiple_win_loss_volume: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    median_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    std_durations: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    min_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    max_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    cv_durations: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    median_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    std_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    min_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    max_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    cv_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    median_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    std_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    min_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    max_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    cv_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_tp_vs_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    median_tp_vs_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    min_tp_vs_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    max_tp_vs_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    cv_tp_vs_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_num_consec_wins: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    median_num_consec_wins: Mapped[Optional[int]] = mapped_column(Integer)
+    max_num_consec_wins: Mapped[Optional[int]] = mapped_column(Integer)
+    mean_num_consec_losses: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    median_num_consec_losses: Mapped[Optional[int]] = mapped_column(Integer)
+    max_num_consec_losses: Mapped[Optional[int]] = mapped_column(Integer)
+    mean_val_consec_wins: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_val_consec_wins: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_val_consec_wins: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_val_consec_losses: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_val_consec_losses: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_val_consec_losses: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_num_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    median_num_open_pos: Mapped[Optional[int]] = mapped_column(Integer)
+    max_num_open_pos: Mapped[Optional[int]] = mapped_column(Integer)
+    mean_val_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_val_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_val_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_val_to_eqty_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    median_val_to_eqty_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    max_val_to_eqty_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_account_margin: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_firm_margin: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_trades_per_day: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    median_trades_per_day: Mapped[Optional[int]] = mapped_column(Integer)
+    min_trades_per_day: Mapped[Optional[int]] = mapped_column(Integer)
+    max_trades_per_day: Mapped[Optional[int]] = mapped_column(Integer)
+    cv_trades_per_day: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_idle_days: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    median_idle_days: Mapped[Optional[int]] = mapped_column(Integer)
+    max_idle_days: Mapped[Optional[int]] = mapped_column(Integer)
+    min_idle_days: Mapped[Optional[int]] = mapped_column(Integer)
+    num_traded_symbols: Mapped[Optional[int]] = mapped_column(Integer)
+    most_traded_symbol: Mapped[Optional[str]] = mapped_column(String(50))
+    most_traded_smb_trades: Mapped[Optional[int]] = mapped_column(Integer)
+    updated_date: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    ingestion_timestamp: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    source_api_endpoint: Mapped[Optional[str]] = mapped_column(String(500))
+
+
+class RawMetricsDaily(Base):
+    __tablename__ = 'raw_metrics_daily'
+    __table_args__ = (
+        CheckConstraint('gross_loss <= 0::numeric', name='raw_metrics_daily_gross_loss_check'),
+        CheckConstraint('gross_profit >= 0::numeric', name='raw_metrics_daily_gross_profit_check'),
+        CheckConstraint('num_trades >= 0', name='raw_metrics_daily_num_trades_check'),
+        CheckConstraint('profit_factor >= 0::numeric', name='raw_metrics_daily_profit_factor_check'),
+        CheckConstraint('status = ANY (ARRAY[1, 2, 3])', name='raw_metrics_daily_status_check'),
+        CheckConstraint('success_rate >= 0::numeric AND success_rate <= 100::numeric', name='raw_metrics_daily_success_rate_check'),
+        PrimaryKeyConstraint('account_id', 'date', name='raw_metrics_daily_pkey'),
+        Index('idx_raw_metrics_daily_account_date', 'account_id', 'date'),
+        Index('idx_raw_metrics_daily_date', 'date'),
+        Index('idx_raw_metrics_daily_login', 'login'),
+        Index('idx_raw_metrics_daily_profit', 'date', 'net_profit'),
+        {'schema': 'prop_trading_model'}
+    )
+
+    date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
+    login: Mapped[str] = mapped_column(String(255))
+    account_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    plan_id: Mapped[Optional[str]] = mapped_column(String(255))
+    trader_id: Mapped[Optional[str]] = mapped_column(String(255))
+    status: Mapped[Optional[int]] = mapped_column(Integer)
+    type: Mapped[Optional[int]] = mapped_column(Integer)
+    phase: Mapped[Optional[int]] = mapped_column(Integer)
+    broker: Mapped[Optional[int]] = mapped_column(Integer)
+    platform: Mapped[Optional[int]] = mapped_column(Integer)
+    price_stream: Mapped[Optional[int]] = mapped_column(Integer)
+    country: Mapped[Optional[str]] = mapped_column(String(2))
+    days_to_next_payout: Mapped[Optional[int]] = mapped_column(Integer)
+    todays_payouts: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    approved_payouts: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    pending_payouts: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    starting_balance: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    prior_days_balance: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    prior_days_equity: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    current_balance: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    current_equity: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    first_trade_date: Mapped[Optional[datetime.date]] = mapped_column(Date)
+    days_since_initial_deposit: Mapped[Optional[int]] = mapped_column(Integer)
+    days_since_first_trade: Mapped[Optional[int]] = mapped_column(Integer)
+    num_trades: Mapped[Optional[int]] = mapped_column(Integer)
+    net_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    gross_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    gross_loss: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    gain_to_pain: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    profit_factor: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    success_rate: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    expectancy: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    std_profits: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    risk_adj_profit: Mapped[Optional[float]] = mapped_column(Double(53))
+    min_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_perc_10: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_perc_25: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_perc_75: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_perc_90: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_top_10_prcnt_trades: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_bottom_10_prcnt_trades: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    top_10_prcnt_profit_contrib: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    bottom_10_prcnt_loss_contrib: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    one_std_outlier_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    one_std_outlier_profit_contrib: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    two_std_outlier_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    two_std_outlier_profit_contrib: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    net_profit_per_usd_volume: Mapped[Optional[float]] = mapped_column(Double(53))
+    gross_profit_per_usd_volume: Mapped[Optional[float]] = mapped_column(Double(53))
+    gross_loss_per_usd_volume: Mapped[Optional[float]] = mapped_column(Double(53))
+    distance_gross_profit_loss_per_usd_volume: Mapped[Optional[float]] = mapped_column(Double(53))
+    multiple_gross_profit_loss_per_usd_volume: Mapped[Optional[float]] = mapped_column(Double(53))
+    gross_profit_per_lot: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    gross_loss_per_lot: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    distance_gross_profit_loss_per_lot: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    multiple_gross_profit_loss_per_lot: Mapped[Optional[float]] = mapped_column(Double(53))
+    net_profit_per_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    gross_profit_per_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    gross_loss_per_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    mean_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    std_rets: Mapped[Optional[float]] = mapped_column(Double(53))
+    risk_adj_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    downside_std_rets: Mapped[Optional[float]] = mapped_column(Double(53))
+    downside_risk_adj_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    total_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    daily_mean_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    daily_std_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    daily_sharpe: Mapped[Optional[float]] = mapped_column(Double(53))
+    daily_downside_std_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    daily_sortino: Mapped[Optional[float]] = mapped_column(Double(53))
+    rel_net_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_gross_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_gross_loss: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_mean_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_median_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_std_profits: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_risk_adj_profit: Mapped[Optional[float]] = mapped_column(Double(53))
+    rel_min_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_max_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_perc_10: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_perc_25: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_perc_75: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_perc_90: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_top_10_prcnt_trades: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_bottom_10_prcnt_trades: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_one_std_outlier_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_two_std_outlier_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    mean_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_num_trades_in_dd: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_num_trades_in_dd: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_num_trades_in_dd: Mapped[Optional[int]] = mapped_column(Integer)
+    rel_mean_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_median_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_max_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    total_lots: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    total_volume: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    std_volumes: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_winning_lot: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    mean_losing_lot: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    distance_win_loss_lots: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    multiple_win_loss_lots: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_winning_volume: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_losing_volume: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    distance_win_loss_volume: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    multiple_win_loss_volume: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    median_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    std_durations: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    min_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    max_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    cv_durations: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    median_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    std_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    min_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    max_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    cv_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    median_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    std_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    min_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    max_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    cv_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_tp_vs_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    median_tp_vs_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    min_tp_vs_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    max_tp_vs_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    cv_tp_vs_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_num_consec_wins: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    median_num_consec_wins: Mapped[Optional[int]] = mapped_column(Integer)
+    max_num_consec_wins: Mapped[Optional[int]] = mapped_column(Integer)
+    mean_num_consec_losses: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    median_num_consec_losses: Mapped[Optional[int]] = mapped_column(Integer)
+    max_num_consec_losses: Mapped[Optional[int]] = mapped_column(Integer)
+    mean_val_consec_wins: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_val_consec_wins: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_val_consec_wins: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_val_consec_losses: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_val_consec_losses: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_val_consec_losses: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_num_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    median_num_open_pos: Mapped[Optional[int]] = mapped_column(Integer)
+    max_num_open_pos: Mapped[Optional[int]] = mapped_column(Integer)
+    mean_val_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_val_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_val_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_val_to_eqty_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    median_val_to_eqty_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    max_val_to_eqty_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_account_margin: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_firm_margin: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    num_traded_symbols: Mapped[Optional[int]] = mapped_column(Integer)
+    most_traded_symbol: Mapped[Optional[str]] = mapped_column(String(50))
+    most_traded_smb_trades: Mapped[Optional[int]] = mapped_column(Integer)
+    ingestion_timestamp: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    source_api_endpoint: Mapped[Optional[str]] = mapped_column(String(500))
+
+
+class RawMetricsHourly(Base):
+    __tablename__ = 'raw_metrics_hourly'
+    __table_args__ = (
+        CheckConstraint('gross_loss <= 0::numeric', name='raw_metrics_hourly_gross_loss_check'),
+        CheckConstraint('gross_profit >= 0::numeric', name='raw_metrics_hourly_gross_profit_check'),
+        CheckConstraint('num_trades >= 0', name='raw_metrics_hourly_num_trades_check'),
+        CheckConstraint('profit_factor >= 0::numeric', name='raw_metrics_hourly_profit_factor_check'),
+        CheckConstraint('status = ANY (ARRAY[1, 2, 3])', name='raw_metrics_hourly_status_check'),
+        CheckConstraint('success_rate >= 0::numeric AND success_rate <= 100::numeric', name='raw_metrics_hourly_success_rate_check'),
+        PrimaryKeyConstraint('account_id', 'date', 'hour', name='raw_metrics_hourly_pkey1'),
+        Index('raw_metrics_hourly_account_id_date_hour_idx', 'account_id', 'date', 'hour'),
+        Index('raw_metrics_hourly_date_hour_idx', 'date', 'hour'),
+        Index('raw_metrics_hourly_date_hour_net_profit_idx', 'date', 'hour', 'net_profit'),
+        Index('raw_metrics_hourly_plan_id_idx', 'plan_id'),
+        Index('raw_metrics_hourly_status_date_hour_idx', 'status', 'date', 'hour'),
+        {'schema': 'prop_trading_model'}
+    )
+
+    date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
+    datetime: Mapped[datetime.datetime] = mapped_column(DateTime)
+    hour: Mapped[int] = mapped_column(Integer, primary_key=True)
+    login: Mapped[str] = mapped_column(String(255))
+    account_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    plan_id: Mapped[Optional[str]] = mapped_column(String(255))
+    trader_id: Mapped[Optional[str]] = mapped_column(String(255))
+    status: Mapped[Optional[int]] = mapped_column(Integer)
+    type: Mapped[Optional[int]] = mapped_column(Integer)
+    phase: Mapped[Optional[int]] = mapped_column(Integer)
+    broker: Mapped[Optional[int]] = mapped_column(Integer)
+    platform: Mapped[Optional[int]] = mapped_column(Integer)
+    price_stream: Mapped[Optional[int]] = mapped_column(Integer)
+    country: Mapped[Optional[str]] = mapped_column(String(2))
+    days_to_next_payout: Mapped[Optional[int]] = mapped_column(Integer)
+    todays_payouts: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    approved_payouts: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    pending_payouts: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    starting_balance: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    prior_days_balance: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    prior_days_equity: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    current_balance: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    current_equity: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    first_trade_date: Mapped[Optional[datetime.date]] = mapped_column(Date)
+    days_since_initial_deposit: Mapped[Optional[int]] = mapped_column(Integer)
+    days_since_first_trade: Mapped[Optional[int]] = mapped_column(Integer)
+    num_trades: Mapped[Optional[int]] = mapped_column(Integer)
+    net_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    gross_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    gross_loss: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    gain_to_pain: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    profit_factor: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    success_rate: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    expectancy: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    std_profits: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    risk_adj_profit: Mapped[Optional[float]] = mapped_column(Double(53))
+    min_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_perc_10: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_perc_25: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_perc_75: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_perc_90: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_top_10_prcnt_trades: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_bottom_10_prcnt_trades: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    top_10_prcnt_profit_contrib: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    bottom_10_prcnt_loss_contrib: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    one_std_outlier_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    one_std_outlier_profit_contrib: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    two_std_outlier_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    two_std_outlier_profit_contrib: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    net_profit_per_usd_volume: Mapped[Optional[float]] = mapped_column(Double(53))
+    gross_profit_per_usd_volume: Mapped[Optional[float]] = mapped_column(Double(53))
+    gross_loss_per_usd_volume: Mapped[Optional[float]] = mapped_column(Double(53))
+    distance_gross_profit_loss_per_usd_volume: Mapped[Optional[float]] = mapped_column(Double(53))
+    multiple_gross_profit_loss_per_usd_volume: Mapped[Optional[float]] = mapped_column(Double(53))
+    gross_profit_per_lot: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    gross_loss_per_lot: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    distance_gross_profit_loss_per_lot: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    multiple_gross_profit_loss_per_lot: Mapped[Optional[float]] = mapped_column(Double(53))
+    net_profit_per_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    gross_profit_per_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    gross_loss_per_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    mean_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    std_rets: Mapped[Optional[float]] = mapped_column(Double(53))
+    risk_adj_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    downside_std_rets: Mapped[Optional[float]] = mapped_column(Double(53))
+    downside_risk_adj_ret: Mapped[Optional[float]] = mapped_column(Double(53))
+    rel_net_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_gross_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_gross_loss: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_mean_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_median_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_std_profits: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_risk_adj_profit: Mapped[Optional[float]] = mapped_column(Double(53))
+    rel_min_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_max_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_perc_10: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_perc_25: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_perc_75: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_perc_90: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_top_10_prcnt_trades: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_profit_bottom_10_prcnt_trades: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_one_std_outlier_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_two_std_outlier_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    mean_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_num_trades_in_dd: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_num_trades_in_dd: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_num_trades_in_dd: Mapped[Optional[int]] = mapped_column(Integer)
+    rel_mean_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_median_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    rel_max_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    total_lots: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    total_volume: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    std_volumes: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_winning_lot: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    mean_losing_lot: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    distance_win_loss_lots: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    multiple_win_loss_lots: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_winning_volume: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_losing_volume: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    distance_win_loss_volume: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    multiple_win_loss_volume: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    median_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    std_durations: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    min_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    max_duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    cv_durations: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    median_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    std_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    min_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    max_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    cv_tp: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    median_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    std_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    min_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    max_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    cv_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_tp_vs_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    median_tp_vs_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    min_tp_vs_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    max_tp_vs_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    cv_tp_vs_sl: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_num_consec_wins: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    median_num_consec_wins: Mapped[Optional[int]] = mapped_column(Integer)
+    max_num_consec_wins: Mapped[Optional[int]] = mapped_column(Integer)
+    mean_num_consec_losses: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    median_num_consec_losses: Mapped[Optional[int]] = mapped_column(Integer)
+    max_num_consec_losses: Mapped[Optional[int]] = mapped_column(Integer)
+    mean_val_consec_wins: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_val_consec_wins: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_val_consec_wins: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_val_consec_losses: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_val_consec_losses: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_val_consec_losses: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_num_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    median_num_open_pos: Mapped[Optional[int]] = mapped_column(Integer)
+    max_num_open_pos: Mapped[Optional[int]] = mapped_column(Integer)
+    mean_val_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    median_val_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_val_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_val_to_eqty_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    median_val_to_eqty_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    max_val_to_eqty_open_pos: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 6))
+    mean_account_margin: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    mean_firm_margin: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    num_traded_symbols: Mapped[Optional[int]] = mapped_column(Integer)
+    most_traded_symbol: Mapped[Optional[str]] = mapped_column(String(50))
+    most_traded_smb_trades: Mapped[Optional[int]] = mapped_column(Integer)
+    ingestion_timestamp: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    source_api_endpoint: Mapped[Optional[str]] = mapped_column(String(500))
+
+
+class RawPlansData(Base):
+    __tablename__ = 'raw_plans_data'
+    __table_args__ = (
+        CheckConstraint('inactivity_period >= 0', name='raw_plans_data_inactivity_period_check'),
+        CheckConstraint('max_daily_drawdown_pct >= 0::numeric AND max_daily_drawdown_pct <= 100::numeric', name='raw_plans_data_max_daily_drawdown_pct_check'),
+        CheckConstraint('max_drawdown_pct >= 0::numeric AND max_drawdown_pct <= 100::numeric', name='raw_plans_data_max_drawdown_pct_check'),
+        CheckConstraint('max_leverage > 0::numeric', name='raw_plans_data_max_leverage_check'),
+        CheckConstraint('max_trading_days >= 0', name='raw_plans_data_max_trading_days_check'),
+        CheckConstraint('min_trading_days >= 0', name='raw_plans_data_min_trading_days_check'),
+        CheckConstraint('profit_share_pct >= 0::numeric AND profit_share_pct <= 100::numeric', name='raw_plans_data_profit_share_pct_check'),
+        CheckConstraint('profit_target_pct >= 0::numeric AND profit_target_pct <= 100::numeric', name='raw_plans_data_profit_target_pct_check'),
+        CheckConstraint('starting_balance > 0::numeric', name='raw_plans_data_starting_balance_check'),
+        PrimaryKeyConstraint('plan_id', name='raw_plans_data_pkey'),
+        Index('idx_raw_plans_name', 'plan_name'),
+        Index('idx_raw_plans_plan_id', 'plan_id'),
+        {'schema': 'prop_trading_model'}
+    )
+
+    plan_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    plan_name: Mapped[str] = mapped_column(String(255))
+    plan_type: Mapped[Optional[str]] = mapped_column(String(100))
+    starting_balance: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_target: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_target_pct: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    max_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_drawdown_pct: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    max_daily_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_daily_drawdown_pct: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    profit_share_pct: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    max_leverage: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    min_trading_days: Mapped[Optional[int]] = mapped_column(Integer)
+    max_trading_days: Mapped[Optional[int]] = mapped_column(Integer)
+    is_drawdown_relative: Mapped[Optional[bool]] = mapped_column(Boolean, server_default=text('false'))
+    liquidate_friday: Mapped[Optional[bool]] = mapped_column(Boolean, server_default=text('false'), comment='Whether account can hold positions over the weekend (TRUE = must liquidate, FALSE = can hold)')
+    inactivity_period: Mapped[Optional[int]] = mapped_column(Integer, comment='Number of days an account can go without placing a trade before breach')
+    daily_drawdown_by_balance_equity: Mapped[Optional[bool]] = mapped_column(Boolean, server_default=text('false'), comment='How daily drawdown is calculated (TRUE = from previous day balance or equity whichever is higher, FALSE = from previous day balance only)')
+    enable_consistency: Mapped[Optional[bool]] = mapped_column(Boolean, server_default=text('false'), comment='Whether consistency rules are applied to the account')
+    created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    ingestion_timestamp: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    source_api_endpoint: Mapped[Optional[str]] = mapped_column(String(500))
+
+
+class RawRegimesDaily(Base):
+    __tablename__ = 'raw_regimes_daily'
+    __table_args__ = (
+        PrimaryKeyConstraint('id', name='raw_regimes_daily_pkey'),
+        UniqueConstraint('date', name='raw_regimes_daily_date_key'),
+        Index('idx_raw_regimes_date', 'date'),
+        Index('idx_raw_regimes_summary', 'summary'),
+        {'schema': 'prop_trading_model'}
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    date: Mapped[datetime.date] = mapped_column(Date)
+    regime_name: Mapped[Optional[str]] = mapped_column(String(100))
+    summary: Mapped[Optional[dict]] = mapped_column(JSONB)
+    ingestion_timestamp: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    source_api_endpoint: Mapped[Optional[str]] = mapped_column(String(500))
+
+
+class RawTradesClosed(Base):
+    __tablename__ = 'raw_trades_closed'
+    __table_args__ = (
+        CheckConstraint("side::text = ANY (ARRAY['buy'::character varying, 'sell'::character varying, 'BUY'::character varying, 'SELL'::character varying, 'Buy'::character varying, 'Sell'::character varying]::text[])", name='raw_trades_closed_side_check'),
+        PrimaryKeyConstraint('platform', 'position', 'trade_date', name='raw_trades_closed_pkey'),
+        UniqueConstraint('position', 'login', 'platform', 'broker', 'trade_date', name='raw_trades_closed_position_login_platform_broker_trade_date_key'),
+        Index('idx_raw_trades_closed_account_id', 'account_id', 'trade_date'),
+        Index('idx_raw_trades_closed_login_platform_broker', 'login', 'platform', 'broker'),
+        Index('idx_raw_trades_closed_profit', 'profit', 'trade_date'),
+        Index('idx_raw_trades_closed_symbol', 'std_symbol', 'trade_date'),
+        {'schema': 'prop_trading_model'}
+    )
+
+    trade_date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
+    platform: Mapped[int] = mapped_column(Integer, primary_key=True)
+    position: Mapped[str] = mapped_column(String(255), primary_key=True)
+    login: Mapped[str] = mapped_column(String(255))
+    std_symbol: Mapped[str] = mapped_column(String(50))
+    broker: Mapped[Optional[int]] = mapped_column(Integer)
+    manager: Mapped[Optional[int]] = mapped_column(Integer)
+    ticket: Mapped[Optional[int]] = mapped_column(Integer)
+    account_id: Mapped[Optional[str]] = mapped_column(String(255), comment='Account ID - may be temporarily set to login value until proper resolution with platform/mt_version is implemented')
+    side: Mapped[Optional[str]] = mapped_column(String(10))
+    lots: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 4))
+    contract_size: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 4))
+    qty_in_base_ccy: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 4))
+    volume_usd: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 4))
+    stop_loss: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    take_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    open_time: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    open_price: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    close_time: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    close_price: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    commission: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    fee: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    swap: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    comment: Mapped[Optional[str]] = mapped_column(String(255))
+    ingestion_timestamp: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    source_api_endpoint: Mapped[Optional[str]] = mapped_column(String(500))
+
+
+class RawTradesOpen(Base):
+    __tablename__ = 'raw_trades_open'
+    __table_args__ = (
+        CheckConstraint("side::text = ANY (ARRAY['buy'::character varying, 'sell'::character varying, 'BUY'::character varying, 'SELL'::character varying, 'Buy'::character varying, 'Sell'::character varying]::text[])", name='raw_trades_open_side_check'),
+        PrimaryKeyConstraint('platform', 'position', 'trade_date', name='raw_trades_open_pkey'),
+        UniqueConstraint('position', 'login', 'platform', 'broker', 'trade_date', name='raw_trades_open_position_login_platform_broker_trade_date_key'),
+        Index('idx_raw_trades_open_account_id', 'account_id', 'trade_date'),
+        Index('idx_raw_trades_open_login_platform_broker', 'login', 'platform', 'broker'),
+        Index('idx_raw_trades_open_profit', 'unrealized_profit', 'trade_date'),
+        Index('idx_raw_trades_open_symbol', 'std_symbol', 'trade_date'),
+        {'schema': 'prop_trading_model'}
+    )
+
+    trade_date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
+    platform: Mapped[str] = mapped_column(String(255), primary_key=True)
+    position: Mapped[str] = mapped_column(String(255), primary_key=True)
+    login: Mapped[str] = mapped_column(String(255))
+    std_symbol: Mapped[str] = mapped_column(String(50))
+    broker: Mapped[Optional[str]] = mapped_column(String(255))
+    manager: Mapped[Optional[str]] = mapped_column(String(255))
+    ticket: Mapped[Optional[str]] = mapped_column(String(255))
+    account_id: Mapped[Optional[str]] = mapped_column(String(255), comment='Account ID - may be temporarily set to login value until proper resolution with platform/mt_version is implemented')
+    side: Mapped[Optional[str]] = mapped_column(String(10))
+    lots: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 4))
+    contract_size: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 4))
+    qty_in_base_ccy: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 4))
+    volume_usd: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 4))
+    stop_loss: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    take_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    open_time: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    open_price: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 6))
+    duration: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    unrealized_profit: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    commission: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    fee: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    swap: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    comment: Mapped[Optional[str]] = mapped_column(String(255))
+    ingestion_timestamp: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    source_api_endpoint: Mapped[Optional[str]] = mapped_column(String(500))
+
+
+class ScheduledJobs(Base):
+    __tablename__ = 'scheduled_jobs'
+    __table_args__ = (
+        PrimaryKeyConstraint('job_name', name='scheduled_jobs_pkey'),
+        {'schema': 'prop_trading_model'}
+    )
+
+    job_name: Mapped[str] = mapped_column(String(100), primary_key=True)
+    schedule: Mapped[str] = mapped_column(String(100))
+    last_run: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    next_run: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    status: Mapped[Optional[str]] = mapped_column(String(50))
+    error_count: Mapped[Optional[int]] = mapped_column(Integer, server_default=text('0'))
+    command: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+
+
+class SchemaMigrations(Base):
+    __tablename__ = 'schema_migrations'
+    __table_args__ = (
+        PrimaryKeyConstraint('migration_name', name='schema_migrations_pkey'),
+        {'comment': 'Tracks applied database migrations',
+     'schema': 'prop_trading_model'}
+    )
+
+    migration_name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    checksum: Mapped[str] = mapped_column(String(64))
+    applied_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    applied_by: Mapped[Optional[str]] = mapped_column(String(100), server_default=text('CURRENT_USER'))
+    execution_time_ms: Mapped[Optional[int]] = mapped_column(Integer)
+    success: Mapped[Optional[bool]] = mapped_column(Boolean, server_default=text('true'))
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class SchemaVersion(Base):
+    __tablename__ = 'schema_version'
+    __table_args__ = (
+        CheckConstraint("status::text = ANY (ARRAY['applied'::character varying, 'rolled_back'::character varying, 'failed'::character varying]::text[])", name='schema_version_status_check'),
+        PrimaryKeyConstraint('version_id', name='schema_version_pkey'),
+        UniqueConstraint('version_hash', name='schema_version_version_hash_key'),
+        Index('idx_schema_version_applied_at', 'applied_at'),
+        {'schema': 'prop_trading_model'}
+    )
+
+    version_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    version_hash: Mapped[str] = mapped_column(String(32))
+    applied_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    applied_by: Mapped[Optional[str]] = mapped_column(String(100), server_default=text('CURRENT_USER'))
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    migration_script: Mapped[Optional[str]] = mapped_column(Text)
+    rollback_script: Mapped[Optional[str]] = mapped_column(Text)
+    objects_affected: Mapped[Optional[dict]] = mapped_column(JSONB)
+    execution_time_ms: Mapped[Optional[int]] = mapped_column(Integer)
+    status: Mapped[Optional[str]] = mapped_column(String(20), server_default=text("'applied'::character varying"))
+
+
+class StgAccountsDailySnapshots(Base):
+    __tablename__ = 'stg_accounts_daily_snapshots'
+    __table_args__ = (
+        CheckConstraint('phase = ANY (ARRAY[1, 2, 3, 4])', name='stg_accounts_daily_snapshots_phase_check'),
+        CheckConstraint('status = ANY (ARRAY[1, 2, 3])', name='stg_accounts_daily_snapshots_status_check'),
+        PrimaryKeyConstraint('account_id', 'snapshot_date', name='stg_accounts_daily_snapshots_pkey'),
+        Index('idx_stg_accounts_daily_account_date', 'account_id', 'snapshot_date'),
+        Index('idx_stg_accounts_daily_date', 'snapshot_date'),
+        Index('idx_stg_accounts_daily_status', 'status'),
+        {'schema': 'prop_trading_model'}
+    )
+
+    account_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    snapshot_date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
+    login: Mapped[str] = mapped_column(String(255))
+    plan_id: Mapped[Optional[str]] = mapped_column(String(255))
+    trader_id: Mapped[Optional[str]] = mapped_column(String(255))
+    status: Mapped[Optional[int]] = mapped_column(Integer)
+    type: Mapped[Optional[int]] = mapped_column(Integer)
+    phase: Mapped[Optional[int]] = mapped_column(Integer)
+    broker: Mapped[Optional[int]] = mapped_column(Integer)
+    platform: Mapped[Optional[int]] = mapped_column(Integer)
+    country: Mapped[Optional[str]] = mapped_column(String(2))
+    starting_balance: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    balance: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    equity: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_target: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    profit_target_pct: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    max_daily_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_daily_drawdown_pct: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    max_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    max_drawdown_pct: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
+    max_leverage: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
+    is_drawdown_relative: Mapped[Optional[bool]] = mapped_column(Boolean)
+    distance_to_profit_target: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    distance_to_max_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
+    liquidate_friday: Mapped[Optional[bool]] = mapped_column(Boolean, server_default=text('false'))
+    inactivity_period: Mapped[Optional[int]] = mapped_column(Integer)
+    daily_drawdown_by_balance_equity: Mapped[Optional[bool]] = mapped_column(Boolean, server_default=text('false'))
+    enable_consistency: Mapped[Optional[bool]] = mapped_column(Boolean, server_default=text('false'))
+    days_active: Mapped[Optional[int]] = mapped_column(Integer)
+    days_since_last_trade: Mapped[Optional[int]] = mapped_column(Integer)
+    created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
