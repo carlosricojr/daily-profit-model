@@ -6,7 +6,7 @@ import os
 import logging
 from typing import Optional, Any, Dict, List, Tuple
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import psycopg2
 from psycopg2.extras import RealDictCursor, execute_batch
 from sqlalchemy import create_engine, text, MetaData
@@ -187,7 +187,7 @@ class DatabaseManager:
         inside execution_details JSON so we do **not** need to alter the table.
         """
 
-        now_ts = datetime.now(timezone.UTC)
+        now_ts = datetime.now(timezone.utc)
         end_ts: Optional[datetime]
 
         if status.lower() == "running":
