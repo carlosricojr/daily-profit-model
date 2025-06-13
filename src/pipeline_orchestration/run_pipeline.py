@@ -81,7 +81,7 @@ class PipelineOrchestrator:
         self,
         stages: Optional[List[str]] = None,
         start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        end_date: Optional[date] = (datetime.now() - timedelta(days=1)).date(),
         skip_completed: bool = True,
         dry_run: bool = False,
         force_recreate_schema: bool = False,
@@ -366,9 +366,6 @@ class PipelineOrchestrator:
         
         commands.append(("ingest_regimes", regime_args))
 
-        # Note: Accounts ingestion removed - account IDs are now resolved batch-wise 
-        # after trades ingestion using data from raw_metrics_alltime
-
         for script_name, args in commands:
             if skip_completed and self._is_stage_completed(script_name):
                 logger.info(f"Skipping {script_name} - already completed today")
@@ -419,11 +416,9 @@ class PipelineOrchestrator:
                 "create_staging_snapshots",
                 [
                     "--start-date",
-                    str(start_date) if start_date else "2024-01-01",
+                    str(start_date),
                     "--end-date",
-                    str(end_date)
-                    if end_date
-                    else str(date.today() - timedelta(days=1)),
+                    str(end_date) if end_date else str(date.today() - timedelta(days=1)),
                     "--clean-data",
                     "--log-level",
                     "INFO",
@@ -655,11 +650,9 @@ class PipelineOrchestrator:
                 "engineer_features",
                 [
                     "--start-date",
-                    str(start_date) if start_date else "2024-01-01",
+                    str(start_date),
                     "--end-date",
-                    str(end_date)
-                    if end_date
-                    else str(date.today() - timedelta(days=1)),
+                    str(end_date) if end_date else str(date.today() - timedelta(days=1)),
                     "--log-level",
                     "INFO",
                 ],
@@ -668,11 +661,10 @@ class PipelineOrchestrator:
                 "build_training_data",
                 [
                     "--start-date",
-                    str(start_date) if start_date else "2024-01-01",
+                    str(start_date),
                     "--end-date",
                     str(end_date)
-                    if end_date
-                    else str(date.today() - timedelta(days=2)),
+                    if end_date else str(date.today() - timedelta(days=2)),
                     "--validate",
                     "--log-level",
                     "INFO",
@@ -932,6 +924,10 @@ Examples:
 
     # Set up logging
     setup_logging(log_level=args.log_level, log_file="pipeline_orchestration")
+
+    # Derive default dates when user omits them
+    if args.start_date is None:
+        args.start_date = date(2024, 1, 1)
 
     # Run pipeline
     orchestrator = PipelineOrchestrator()
