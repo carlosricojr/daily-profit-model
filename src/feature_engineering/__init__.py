@@ -49,4 +49,6 @@ __all__ = [
     "engineer_features_enhanced_v2",
     "FEATURE_VERSION",
     "PRODUCTION_CONFIG",
+    "OriginalOptimizedFeatureEngineer",
+    "OriginalIntegratedProductionFeatureEngineer",
 ]

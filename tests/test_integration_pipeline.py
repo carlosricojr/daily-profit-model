@@ -143,7 +143,7 @@ class TestIntegrationPipeline(unittest.TestCase):
 
         api_client = RiskAnalyticsAPIClient()
 
-        # Fixed implementation uses total count for intelligent termination
+        # Fixed implementation uses total count for termination
         all_results = []
         for page in api_client.paginate("/metrics/daily", params={"limit": 10}):
             all_results.extend(page)

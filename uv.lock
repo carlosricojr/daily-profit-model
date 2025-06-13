@@ -733,6 +733,7 @@ name = "daily-profit-model"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "alembic" },
     { name = "apache-airflow" },
     { name = "apache-airflow-providers-postgres" },
     { name = "dash" },
@@ -752,7 +753,6 @@ dependencies = [
     { name = "psycopg2-binary" },
     { name = "pydantic" },
     { name = "pyod" },
-    { name = "pyyaml" },
     { name = "requests" },
     { name = "scikit-learn" },
     { name = "scipy" },
@@ -782,6 +782,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "alembic", specifier = ">=1.16.1" },
     { name = "apache-airflow", specifier = ">=3.0.2" },
     { name = "apache-airflow-providers-postgres", specifier = ">=6.2.0" },
     { name = "dash", specifier = ">=2.8.0" },
@@ -801,7 +802,6 @@ requires-dist = [
     { name = "psycopg2-binary", specifier = ">=2.9.10" },
     { name = "pydantic", specifier = ">=1.10.0" },
     { name = "pyod", specifier = ">=1.0.0" },
-    { name = "pyyaml", specifier = ">=6.0" },
     { name = "requests", specifier = ">=2.32.3" },
     { name = "scikit-learn", specifier = ">=1.6.1" },
     { name = "scipy", specifier = ">=1.10.0" },

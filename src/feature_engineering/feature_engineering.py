@@ -36,7 +36,7 @@ def get_optimal_config():
     total_ram_mb = psutil.virtual_memory().total // (1024**2)
 
     return {
-        "batch_size": min(3000, total_ram_mb // 40),  # Dynamic based on RAM
+        "batch_size": max(100, min(3000, total_ram_mb // 40)),  # Minimum 100, Dynamic based on RAM
         "chunk_size": min(8000, total_ram_mb // 15),
         "max_workers": max(1, cpu_count - 4),  # Leave 4 cores for OS
         "memory_limit_mb": int(total_ram_mb * 0.85),  # 85% of total RAM
@@ -1012,6 +1012,9 @@ class UnifiedFeatureEngineer:
 
         # Parse sentiment score
         try:
+            if regime_data.get("news_analysis") is None:
+                raise ValueError("NULL news_analysis")
+                
             news_analysis = (
                 json.loads(regime_data["news_analysis"])
                 if isinstance(regime_data["news_analysis"], str)
@@ -1027,6 +1030,9 @@ class UnifiedFeatureEngineer:
 
         # Parse volatility regime and liquidity state
         try:
+            if regime_data.get("summary") is None:
+                raise ValueError("NULL summary")
+                
             summary = (
                 json.loads(regime_data["summary"])
                 if isinstance(regime_data["summary"], str)
@@ -1035,22 +1041,29 @@ class UnifiedFeatureEngineer:
 
             key_metrics = summary.get("key_metrics", {})
             features["market_volatility_regime"] = key_metrics.get(
-                "volatility_regime", "normal"
+                "volatility_regime", "BALANCED"
             )
             features["market_liquidity_state"] = key_metrics.get(
                 "liquidity_state", "normal"
             )
-        except (json.JSONDecodeError, KeyError, TypeError):
-            features["market_volatility_regime"] = "normal"
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            features["market_volatility_regime"] = "BALANCED"
             features["market_liquidity_state"] = "normal"
 
         # Parse instrument data
         try:
+            if regime_data.get("instruments") is None:
+                raise ValueError("NULL instruments")
+                
             instruments = (
                 json.loads(regime_data["instruments"])
                 if isinstance(regime_data["instruments"], str)
                 else regime_data["instruments"]
             )
+
+            # Ensure instruments is a dict with proper structure
+            if not isinstance(instruments, dict):
+                raise TypeError("Invalid instruments format")
 
             # Get specific asset metrics
             vix_data = instruments.get("data", {}).get("VIX", {})
@@ -1076,14 +1089,20 @@ class UnifiedFeatureEngineer:
 
         # Parse economic indicators
         try:
+            if regime_data.get("country_economic_indicators") is None:
+                raise ValueError("NULL country_economic_indicators")
+                
             indicators = (
                 json.loads(regime_data["country_economic_indicators"])
                 if isinstance(regime_data["country_economic_indicators"], str)
                 else regime_data["country_economic_indicators"]
             )
 
+            if indicators is None or not isinstance(indicators, dict):
+                raise TypeError("Invalid indicators format")
+
             features["fed_funds_rate"] = indicators.get("fed_funds_rate_effective", 5.0)
-        except (json.JSONDecodeError, KeyError, TypeError):
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             features["fed_funds_rate"] = 5.0
 
         return features
@@ -1170,7 +1189,7 @@ class UnifiedFeatureEngineer:
                 features.update(
                     {
                         "market_sentiment_score": 0.0,
-                        "market_volatility_regime": "normal",
+                        "market_volatility_regime": "BALANCED",
                         "market_liquidity_state": "normal",
                         "vix_level": 15.0,
                         "dxy_level": 100.0,
@@ -1246,10 +1265,10 @@ class UnifiedFeatureEngineer:
             return features
 
         # Get the account's performance data
-        pnl_df = performance_data[account_id]
+        pnl_df = performance_data[account_id].copy()
 
-        # Filter to only data up to feature_date
-        pnl_df = pnl_df[pnl_df["date"] <= feature_date]
+        # Filter to only data up to feature_date and sort by date descending
+        pnl_df = pnl_df[pnl_df["date"] <= feature_date].sort_values("date", ascending=False)
 
         if pnl_df.empty:
             for window in self.rolling_windows:
@@ -1327,6 +1346,19 @@ class UnifiedFeatureEngineer:
 
         # Get the account's trades data
         trades_df = trades_data[account_id]
+
+        # Check if DataFrame is empty or missing required columns
+        if trades_df.empty or "trade_date" not in trades_df.columns:
+            return {
+                "trades_count_5d": 0,
+                "avg_trade_duration_5d": 0.0,
+                "avg_lots_per_trade_5d": 0.0,
+                "avg_volume_per_trade_5d": 0.0,
+                "stop_loss_usage_rate_5d": 0.0,
+                "take_profit_usage_rate_5d": 0.0,
+                "buy_sell_ratio_5d": 0.5,
+                "top_symbol_concentration_5d": 0.0,
+            }
 
         # Filter to 5-day window
         window_start = feature_date - timedelta(days=4)
@@ -1681,11 +1713,12 @@ class UnifiedFeatureEngineer:
                 daily_profit = enhanced_metrics[metrics_key].get("net_profit", 0)
                 vol_regime = market.get("market_volatility_regime", "normal")
                 
-                if "high" in vol_regime.lower():
+                vol_regime_upper = vol_regime.upper()
+                if vol_regime_upper == "DISPERSED":
                     high_vol_days.append(daily_profit)
-                elif "low" in vol_regime.lower():
+                elif vol_regime_upper == "COMPRESSED":
                     low_vol_days.append(daily_profit)
-                else:
+                elif vol_regime_upper in ["BALANCED", "RIGHT_SKEWED"]:
                     normal_vol_days.append(daily_profit)
         
         # Calculate regime-specific performance
@@ -1725,8 +1758,9 @@ class UnifiedFeatureEngineer:
             features["volatility_adaptability"] = 0.0
         
         # Current regime indicator
-        features["is_high_vol_regime"] = 1 if "high" in volatility_regime.lower() else 0
-        features["is_low_vol_regime"] = 1 if "low" in volatility_regime.lower() else 0
+        volatility_regime_upper = volatility_regime.upper()
+        features["is_high_vol_regime"] = 1 if volatility_regime_upper == "DISPERSED" else 0
+        features["is_low_vol_regime"] = 1 if volatility_regime_upper == "COMPRESSED" else 0
         
         return features
 
@@ -1829,11 +1863,15 @@ class UnifiedFeatureEngineer:
                     saved = self._bulk_save_features(features_batch)
                     total_records += saved
             
-            # Progress logging
-            progress = min(100, ((i + len(batch)) / len(work_items)) * 100)
-            if (i + len(batch)) % 100 == 0 or progress >= 100:
+            # Progress logging at 5% intervals
+            items_processed = i + len(batch)
+            progress = min(100, (items_processed / len(work_items)) * 100)
+            
+            # Log every 5% of total work items or at 100%
+            log_interval = max(1, int(len(work_items) * 0.05))  # 5% of total items
+            if items_processed % log_interval == 0 or progress >= 100:
                 logger.info(
-                    f"Progress: {progress:.1f}% ({i + len(batch)}/{len(work_items)})"
+                    f"Progress: {progress:.1f}% ({items_processed}/{len(work_items)})"
                 )
                 logger.debug(
                     f"Queries executed: {self.query_stats['bulk_queries']} bulk, "
@@ -1957,22 +1995,48 @@ class UnifiedFeatureEngineer:
                     ):
                         self.performance_metrics["validation_violations"] += 1
         
-        # Additional validation for risk metrics
-        risk_metrics = [
-            "daily_sharpe", "daily_sortino", "daily_gain_to_pain",
-            "profit_distribution_skew", "volatility_adaptability"
-        ]
+        # Additional validation for risk metrics with ML best practices
         
-        for metric in risk_metrics:
-            if metric in features:
-                value = features[metric]
-                # Check for unrealistic values
-                if isinstance(value, (int, float)):
-                    if abs(value) > 1000:  # Sanity check
-                        logger.warning(
-                            f"Unrealistic value for {metric}: {value} on {feature_date}"
-                        )
-                        features[metric] = 0.0  # Reset to default
+        # Sharpe and Sortino ratios: typically between -10 and 10 for daily returns
+        for metric in ["daily_sharpe", "daily_sortino"]:
+            if metric in features and isinstance(features[metric], (int, float)):
+                if features[metric] > 10 or features[metric] < -10:
+                    logger.warning(
+                        f"Unrealistic {metric}: {features[metric]} on {feature_date}, resetting to 0.0"
+                    )
+                    features[metric] = 0.0
+        
+        # Gain-to-pain ratio: must be non-negative
+        if "daily_gain_to_pain" in features and isinstance(features["daily_gain_to_pain"], (int, float)):
+            if features["daily_gain_to_pain"] < 0:
+                logger.warning(
+                    f"Negative gain-to-pain ratio: {features['daily_gain_to_pain']} on {feature_date}, resetting to 0.0"
+                )
+                features["daily_gain_to_pain"] = 0.0
+        
+        # Skewness: typically between -10 and 10
+        if "profit_distribution_skew" in features and isinstance(features["profit_distribution_skew"], (int, float)):
+            if abs(features["profit_distribution_skew"]) > 10:
+                logger.warning(
+                    f"Extreme skewness: {features['profit_distribution_skew']} on {feature_date}, resetting to 0.0"
+                )
+                features["profit_distribution_skew"] = 0.0
+        
+        # Kurtosis: must be positive, typically < 50
+        if "profit_distribution_kurtosis" in features and isinstance(features["profit_distribution_kurtosis"], (int, float)):
+            if features["profit_distribution_kurtosis"] < 0 or features["profit_distribution_kurtosis"] > 50:
+                logger.warning(
+                    f"Invalid kurtosis: {features['profit_distribution_kurtosis']} on {feature_date}, resetting to 0.0"
+                )
+                features["profit_distribution_kurtosis"] = 0.0
+        
+        # Volatility adaptability: must be between 0 and 1
+        if "volatility_adaptability" in features and isinstance(features["volatility_adaptability"], (int, float)):
+            if features["volatility_adaptability"] < 0 or features["volatility_adaptability"] > 1:
+                logger.warning(
+                    f"Invalid volatility adaptability: {features['volatility_adaptability']} on {feature_date}, clamping to [0,1]"
+                )
+                features["volatility_adaptability"] = max(0.0, min(1.0, features["volatility_adaptability"]))
         
         return True
 

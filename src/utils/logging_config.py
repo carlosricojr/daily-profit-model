@@ -195,8 +195,10 @@ def setup_logging(
     root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, log_level.upper()))
 
-    # Remove existing handlers
-    root_logger.handlers = []
+    # Remove existing handlers properly
+    for handler in root_logger.handlers[:]:
+        handler.close()
+        root_logger.removeHandler(handler)
 
     # Create formatters
     if enable_json:

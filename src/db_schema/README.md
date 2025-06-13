@@ -13,9 +13,9 @@ This directory contains the database schema and maintenance scripts for the Dail
 
 ## Usage
 
-### Intelligent Schema Management (Recommended)
+### Schema Management (Recommended)
 
-The system now includes intelligent schema management that:
+The system now includes schema management that:
 - Compares current database state with desired schema
 - Generates migrations only for differences
 - Preserves existing data by default
@@ -99,7 +99,7 @@ Auto-generated migrations are saved in `src/db_schema/auto_migrations/` with tim
 
 The system supports two modes:
 
-1. **Intelligent Migration Mode** (Default):
+1. **Migration Mode** (Default):
    - Compares current schema with desired state
    - Generates minimal migrations
    - Preserves data

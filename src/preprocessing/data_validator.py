@@ -1,15 +1,37 @@
 """
 Data validation module for preprocessing pipeline.
 Implements basic data quality checks and validation rules.
+
+⚠️  DEPRECATION NOTICE ⚠️
+This module is deprecated in favor of Great Expectations integration.
+Please use preprocessing.great_expectations_config.GreatExpectationsValidator instead.
+
+The Great Expectations implementation provides:
+- More comprehensive validation rules
+- Better error reporting and data profiling
+- Industry-standard data quality framework
+- ML-specific validation patterns
+- Automated data documentation
+
+For backward compatibility, this module will remain available but is no longer actively maintained.
 """
 
 import logging
+import warnings
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, date
 from dataclasses import dataclass
 from enum import Enum
 import time
 from contextlib import contextmanager
+
+# Issue deprecation warning
+warnings.warn(
+    "DataValidator is deprecated. Please use preprocessing.great_expectations_config.GreatExpectationsValidator instead. "
+    "The Great Expectations implementation provides more comprehensive validation and better ML pipeline integration.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 try:
     from ..utils.logging_config import get_logger
@@ -56,12 +78,23 @@ class DataProfile:
 
 
 class DataValidator:
-    """Enhanced data validation for preprocessing pipeline with production features."""
+    """
+    Enhanced data validation for preprocessing pipeline with production features.
+    
+    ⚠️  DEPRECATED: Use preprocessing.great_expectations_config.GreatExpectationsValidator instead.
+    """
 
     def __init__(
         self, db_manager, enable_profiling: bool = True, timeout_seconds: int = 300
     ):
         """Initialize data validator with enhanced features."""
+        # Issue deprecation warning on instantiation
+        warnings.warn(
+            "DataValidator is deprecated. Please use preprocessing.great_expectations_config.GreatExpectationsValidator instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        
         self.db_manager = db_manager
         self.validation_results = []
         self.enable_profiling = enable_profiling
@@ -104,6 +137,11 @@ class DataValidator:
         Returns:
             List of validation results
         """
+        logger.warning(
+            "DataValidator.validate_staging_snapshot is deprecated. "
+            "Use GreatExpectationsValidator.validate_ml_pipeline_data_quality instead."
+        )
+        
         self.validation_start_time = time.time()
         self.validation_results = []
         self.validation_metrics = {

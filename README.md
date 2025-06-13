@@ -26,9 +26,9 @@ daily-profit-model/
 │   │   ├── indexes/               # Index management
 │   │   ├── maintenance/           # Automated maintenance scripts
 │   │   └── docs/                  # Schema documentation
-│   ├── data_ingestion/            # Intelligent data ingestion (only fetches missing data)
-│   │   ├── ingest_metrics_intelligent.py  # Smart metrics ingestion with precise hourly detection
-│   │   ├── ingest_trades_intelligent.py   # Smart trades ingestion with gap analysis
+│   ├── data_ingestion/            # data ingestion (only fetches missing data)
+│   │   ├── ingest_metrics.py  # Smart metrics ingestion with precise hourly detection
+│   │   ├── ingest_trades_.py   # Smart trades ingestion with gap analysis
 │   │   ├── ingest_plans.py        # Plan data from CSV with validation
 │   │   ├── ingest_regimes.py      # Market regime data ingestion
 │   │   └── discover_active_logins.py      # Efficient account discovery
@@ -43,7 +43,7 @@ daily-profit-model/
 │   │   ├── model_manager.py       # Model lifecycle management
 │   │   └── archive/               # Previous optimization versions
 │   ├── pipeline_orchestration/    # Enhanced orchestration (v2 optimized)
-│   │   ├── run_pipeline_intelligent.py    # Main intelligent orchestration
+│   │   ├── run_pipeline_.py    # Main  orchestration
 │   │   ├── health_checks.py       # Comprehensive health monitoring
 │   │   ├── sla_monitor.py         # SLA tracking and alerting
 │   │   └── airflow_dag.py         # Apache Airflow DAG for automation
@@ -120,19 +120,19 @@ daily-profit-model/
    uv run --env-file .env -- psql -h $DB_HOST -U $DB_USER -d $DB_NAME -f src/db_schema/schema.sql
    ```
 
-   Or using the intelligent pipeline:
+   Or using the  pipeline:
    ```bash
-   uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_intelligent.py --stages schema
+   uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py --stages schema
    ```
 
 ## Running the Pipeline
 
 ### Full Pipeline Execution
 
-To run the complete intelligent pipeline from data ingestion to predictions:
+To run the complete  pipeline from data ingestion to predictions:
 
 ```bash
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_intelligent.py
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py
 ```
 
 ### Running Specific Stages
@@ -140,32 +140,32 @@ uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_intelli
 You can run individual stages or combinations:
 
 ```bash
-# Only intelligent data ingestion
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_intelligent.py --stages ingestion
+# Only  data ingestion
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py --stages ingestion
 
 # Preprocessing and feature engineering
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_intelligent.py --stages preprocessing feature_engineering
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py --stages preprocessing feature_engineering
 
 # Only daily predictions
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_intelligent.py --stages prediction
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py --stages prediction
 ```
 
 ### Individual Script Execution
 
 Each component can also be run independently:
 
-#### Intelligent Data Ingestion
+####  Data Ingestion
 ```bash
 # Smart metrics ingestion (only fetches missing data)
 # Flow 1: Date range provided - gets missing daily, extracts accounts, updates alltime, fills hourly
-uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics_intelligent --start-date 2024-04-15 --end-date 2024-04-22
+uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics --start-date 2024-04-15 --end-date 2024-04-22
 
 # Flow 2: No date range - refreshes all alltime, gets missing daily and hourly
-uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics_intelligent
+uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics
 
 # Smart trades ingestion (only fetches missing data)
-uv run --env-file .env -- python -m src.data_ingestion.ingest_trades_intelligent closed --start-date 2024-04-15 --end-date 2024-04-22
-uv run --env-file .env -- python -m src.data_ingestion.ingest_trades_intelligent open
+uv run --env-file .env -- python -m src.data_ingestion.ingest_trades_ closed --start-date 2024-04-15 --end-date 2024-04-22
+uv run --env-file .env -- python -m src.data_ingestion.ingest_trades_ open
 
 # Ingest plans from CSV
 uv run --env-file .env -- python -m src.data_ingestion.ingest_plans
@@ -218,31 +218,31 @@ uv run --env-file .env -- python -m src.modeling.predict_daily --disable-shadow 
 
 ## Pipeline Options
 
-The intelligent orchestration script supports several options:
+The  orchestration script supports several options:
 
 ```bash
 # Dry run - see what would be executed without running
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_intelligent.py --dry-run
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py --dry-run
 
 # Force re-run of completed stages
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_intelligent.py --force
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py --force
 
-# Specify date range (enables intelligent missing data detection)
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_intelligent.py \
+# Specify date range (enables  missing data detection)
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py \
     --start-date 2024-01-01 \
     --end-date 2024-12-31
 
 # Set logging level
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_intelligent.py --log-level DEBUG
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py --log-level DEBUG
 ```
 
 ## Daily Operation Workflow
 
-For daily operations with intelligent pipeline, you would typically:
+For daily operations with  pipeline, you would typically:
 
-1. **Morning: Intelligent ingestion of only missing data and generate predictions**
+1. **Morning:  ingestion of only missing data and generate predictions**
    ```bash
-   uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_intelligent.py \
+   uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py \
        --stages ingestion preprocessing feature_engineering prediction
    ```
 
@@ -253,13 +253,13 @@ For daily operations with intelligent pipeline, you would typically:
 
 3. **Weekly/Monthly: Retrain model with new data**
    ```bash
-   uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_intelligent.py \
+   uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py \
        --stages feature_engineering training
    ```
 
 ## Enterprise Features
 
-### Intelligent Data Pipeline
+###  Data Pipeline
 
 - **Smart Data Fetching**: Only fetches missing data, reducing API calls by 90%+
 - **Automatic Gap Detection**: SQL-based detection of missing daily, hourly, and trade data
@@ -281,7 +281,7 @@ For daily operations with intelligent pipeline, you would typically:
 
 ### Production Optimizations
 
-- **Intelligent Data Ingestion**: Only fetches missing data, 90%+ reduction in API calls
+- ** Data Ingestion**: Only fetches missing data, 90%+ reduction in API calls
 - **High-throughput Processing**: 15K records/sec ingestion with SQLite checkpointing
 - **Parallel Feature Engineering**: 275% performance improvement with concurrent processing
 - **Database Optimization**: 80% faster queries with partitioning and materialized views
@@ -373,7 +373,7 @@ The pipeline uses an optimized `prop_trading_model` schema with enterprise featu
 
 Enable comprehensive debug logging:
 ```bash
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_intelligent.py --log-level DEBUG
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py --log-level DEBUG
 ```
 
 Check enhanced pipeline status:
@@ -428,7 +428,7 @@ All previous optimization versions are preserved in `/archive/` for:
 ## Performance Benchmarks
 
 ### Current Production Performance
-- **Intelligent Data Ingestion**: 90%+ reduction in API calls, only fetches missing data
+- ** Data Ingestion**: 90%+ reduction in API calls, only fetches missing data
 - **Hourly Metrics Optimization**: 95%+ reduction in unnecessary hourly data fetching through precise (account_id, date, hour) detection
 - **Data Processing**: 15K records/sec with circuit breaker protection  
 - **Database Queries**: 80% faster with partitioning and materialized views
@@ -461,4 +461,4 @@ For questions or issues, please contact the development team or create an issue 
 
 ---
 
-*This system represents an enterprise-grade machine learning pipeline with intelligent data ingestion, advanced monitoring, shadow deployment, and production optimization features. The intelligent pipeline only fetches missing data, reducing processing time and API costs by 90%+ while providing automatic crash recovery and gap detection.*
+*This system represents an enterprise-grade machine learning pipeline with  data ingestion, advanced monitoring, shadow deployment, and production optimization features. The  pipeline only fetches missing data, reducing processing time and API costs by 90%+ while providing automatic crash recovery and gap detection.*

@@ -972,7 +972,7 @@ class TestSchemaIntegration:
         content = readme_file.read_text()
         
         # Check for new documentation sections
-        assert 'Intelligent Schema Management' in content
+        assert 'Schema Management' in content
         assert 'Schema Versioning' in content
         assert '--dry-run' in content
         assert '--force-recreate-schema' in content

@@ -8,13 +8,13 @@ import os
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from src.data_ingestion.ingest_trades_intelligent import IntelligentTradesIngester
+from src.data_ingestion.ingest_trades import TradesIngester
 from src.data_ingestion.base_ingester import IngestionMetrics
 
 
 def test_validation():
     """Test that validation is working."""
-    ingester = IntelligentTradesIngester(enable_validation=True)
+    ingester = TradesIngester(enable_validation=True)
 
     # Test valid trade (using actual API field names)
     valid_trade = {

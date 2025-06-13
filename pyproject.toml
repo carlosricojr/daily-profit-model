@@ -25,7 +25,6 @@ dependencies = [
     "sqlalchemy>=1.4.0",
     # API and configuration
     "requests>=2.32.3",
-    "pyyaml>=6.0",
     # Data validation and quality
     "great-expectations>=0.15.0",
     "pydantic>=1.10.0",
@@ -45,6 +44,7 @@ dependencies = [
     "matplotlib>=3.6.0", # Used for SHAP plots, confidence intervals, and lineage graphs
     "apache-airflow>=3.0.2",
     "apache-airflow-providers-postgres>=6.2.0",
+    "alembic>=1.16.1",
 ]
 
 [project.urls]
@@ -80,4 +80,12 @@ dev = [
     # Development utilities
     "pre-commit>=3.0.0",
     "ipdb>=0.13.0",
+]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    # Ignore deprecation warnings for DataValidator in tests
+    "ignore:DataValidator is deprecated:DeprecationWarning:preprocessing.data_validator",
+    # Ignore resource warnings from logging handlers
+    "ignore:unclosed file.*:ResourceWarning",
 ]

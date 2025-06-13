@@ -629,7 +629,7 @@ class RiskAnalyticsAPIClient:
         include_total: bool = True,
     ) -> Iterator[List[Dict[str, Any]]]:
         """
-        Enhanced pagination with intelligent termination.
+        Enhanced pagination with termination.
 
         Args:
             endpoint: API endpoint path
@@ -694,7 +694,7 @@ class RiskAnalyticsAPIClient:
 
                 yield results
 
-                # Intelligent termination conditions
+                # Termination conditions
 
                 # 1. If we know the total and have fetched everything
                 if total_expected is not None:

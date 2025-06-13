@@ -47,6 +47,10 @@ def get_pipeline_config():
             "ENABLE_DQ_CHECKS", default_var="true"
         ).lower()
         == "true",
+        "enable_great_expectations": Variable.get(
+            "ENABLE_GREAT_EXPECTATIONS", default_var="true"
+        ).lower()
+        == "true",
     }
 
 
@@ -228,14 +232,16 @@ def send_pipeline_alert(
     )
 
 
-def validate_data_quality(**context) -> bool:
-    """Perform data quality checks on ingested data."""
+def validate_data_quality_with_great_expectations(**context) -> bool:
+    """
+    Perform comprehensive data quality checks using Great Expectations.
+    Maintains backward compatibility with existing threshold-based checks.
+    """
     config = get_pipeline_config()
     if not config["enable_data_quality_checks"]:
         logger.info("Data quality checks disabled")
         return True
 
-    hook = PostgresHook(postgres_conn_id="postgres_model_db")
     # More explicit context access for Airflow 3.0
     execution_date = context.get("execution_date") or context.get("logical_date")
     
@@ -243,23 +249,182 @@ def validate_data_quality(**context) -> bool:
         logger.error("Missing execution_date in context")
         return False
 
+    try:
+        # Import Great Expectations validator
+        import sys
+        from pathlib import Path
+        src_dir = Path(__file__).parent.parent
+        sys.path.append(str(src_dir))
+        
+        from preprocessing.great_expectations_config import GreatExpectationsValidator
+        from utils.database import get_db_manager
+        
+        # Initialize Great Expectations validator
+        db_manager = get_db_manager()
+        ge_validator = GreatExpectationsValidator(db_manager)
+        
+        # Run comprehensive ML pipeline validation
+        validation_date = execution_date.date()
+        results = ge_validator.validate_ml_pipeline_data_quality(validation_date)
+        
+        # Check overall pipeline health
+        pipeline_summary = results.get("pipeline_summary", {})
+        overall_success = pipeline_summary.get("overall_success", False)
+        success_rate = pipeline_summary.get("success_rate", 0)
+        
+        # Log detailed results
+        logger.info(f"Great Expectations validation completed for {validation_date}")
+        logger.info(f"Overall success: {overall_success}")
+        logger.info(f"Success rate: {success_rate:.2%}")
+        logger.info(f"Total expectations: {pipeline_summary.get('total_expectations', 0)}")
+        logger.info(f"Successful expectations: {pipeline_summary.get('successful_expectations', 0)}")
+        
+        # Check individual table results and maintain backward compatibility
+        failed_checks = []
+        warning_checks = []
+        
+        # Core data completeness checks (maintaining existing thresholds)
+        hook = PostgresHook(postgres_conn_id="postgres_model_db")
+        
+        # Check raw_metrics_alltime data completeness (replaces old raw_accounts_data check)
+        alltime_query = """
+            SELECT COUNT(*) as count
+            FROM prop_trading_model.raw_metrics_alltime
+            WHERE DATE(ingestion_timestamp) = %s
+        """
+        alltime_result = hook.get_first(alltime_query, parameters=[validation_date])
+        alltime_count = alltime_result[0] if alltime_result else 0
+        
+        if alltime_count < 100:  # Maintain existing threshold
+            failed_checks.append(f"alltime_metrics_completeness: {alltime_count} < 100")
+            logger.error(f"Alltime metrics data completeness failed: {alltime_count} records")
+        else:
+            logger.info(f"Alltime metrics data completeness passed: {alltime_count} records")
+        
+        # Check daily metrics completeness
+        daily_query = """
+            SELECT COUNT(DISTINCT login) as unique_logins
+            FROM prop_trading_model.raw_metrics_daily
+            WHERE date = %s
+        """
+        daily_result = hook.get_first(daily_query, parameters=[validation_date - timedelta(days=1)])
+        daily_count = daily_result[0] if daily_result else 0
+        
+        if daily_count < 50:  # Maintain existing threshold
+            failed_checks.append(f"daily_metrics_completeness: {daily_count} < 50")
+            logger.error(f"Daily metrics data completeness failed: {daily_count} unique logins")
+        else:
+            logger.info(f"Daily metrics data completeness passed: {daily_count} unique logins")
+        
+        # Check data consistency between alltime and daily metrics
+        consistency_query = """
+            SELECT COUNT(*) as count
+            FROM prop_trading_model.raw_metrics_alltime a
+            JOIN prop_trading_model.raw_metrics_daily d
+            ON a.login = d.login
+            WHERE DATE(a.ingestion_timestamp) = %s
+            AND d.date = %s
+        """
+        consistency_result = hook.get_first(
+            consistency_query, 
+            parameters=[validation_date, validation_date - timedelta(days=1)]
+        )
+        consistency_count = consistency_result[0] if consistency_result else 0
+        
+        if consistency_count < 30:  # Maintain existing threshold
+            failed_checks.append(f"data_consistency: {consistency_count} < 30")
+            logger.error(f"Data consistency check failed: {consistency_count} matching records")
+        else:
+            logger.info(f"Data consistency check passed: {consistency_count} matching records")
+        
+        # Process Great Expectations results for each table
+        for table_name, table_result in results.items():
+            if table_name == "pipeline_summary":
+                continue
+                
+            if isinstance(table_result, dict):
+                table_success = table_result.get("success", False)
+                failed_expectations = table_result.get("failed_expectations", 0)
+                total_expectations = table_result.get("total_expectations", 0)
+                
+                if not table_success and failed_expectations > 0:
+                    warning_checks.append(
+                        f"{table_name}: {failed_expectations}/{total_expectations} expectations failed"
+                    )
+                    logger.warning(f"Great Expectations validation failed for {table_name}: "
+                                 f"{failed_expectations} failed expectations")
+                elif table_result.get("error"):
+                    warning_checks.append(f"{table_name}: {table_result['error']}")
+                    logger.warning(f"Great Expectations validation error for {table_name}: "
+                                 f"{table_result['error']}")
+                else:
+                    logger.info(f"Great Expectations validation passed for {table_name}: "
+                              f"{total_expectations} expectations")
+        
+        # Determine overall result
+        has_critical_failures = len(failed_checks) > 0
+        has_warnings = len(warning_checks) > 0
+        
+        # Send alerts if needed
+        if has_critical_failures:
+            message = "Critical data quality checks failed:\n" + "\n".join(failed_checks)
+            if has_warnings:
+                message += "\n\nWarnings:\n" + "\n".join(warning_checks)
+            send_pipeline_alert(context, message, "error")
+            return False
+        elif has_warnings:
+            message = "Data quality warnings detected:\n" + "\n".join(warning_checks)
+            send_pipeline_alert(context, message, "warning")
+            # Continue pipeline execution for warnings
+        
+        # Log success
+        if not has_critical_failures and not has_warnings:
+            logger.info("All data quality checks passed successfully")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Great Expectations validation failed with exception: {str(e)}")
+        # Fallback to basic validation if Great Expectations fails
+        logger.warning("Falling back to basic data quality checks")
+        return validate_data_quality_basic(context)
+
+
+def validate_data_quality_basic(**context) -> bool:
+    """
+    Fallback basic data quality validation.
+    Used when Great Expectations is disabled or fails.
+    """
+    config = get_pipeline_config()
+    if not config["enable_data_quality_checks"]:
+        logger.info("Data quality checks disabled")
+        return True
+
+    hook = PostgresHook(postgres_conn_id="postgres_model_db")
+    execution_date = context.get("execution_date") or context.get("logical_date")
+    
+    if not execution_date:
+        logger.error("Missing execution_date in context")
+        return False
+
+    # Updated checks to use correct table names from schema
     checks = [
         {
-            "name": "accounts_data_completeness",
+            "name": "alltime_metrics_completeness",
             "query": """
                 SELECT COUNT(*) as count
-                FROM prop_trading_model.raw_accounts_data
+                FROM prop_trading_model.raw_metrics_alltime
                 WHERE DATE(ingestion_timestamp) = %s
             """,
             "min_threshold": 100,
             "params": [execution_date.date()],
         },
         {
-            "name": "metrics_data_completeness",
+            "name": "daily_metrics_completeness",
             "query": """
                 SELECT COUNT(DISTINCT login) as unique_logins
                 FROM prop_trading_model.raw_metrics_daily
-                WHERE metric_date = %s
+                WHERE date = %s
             """,
             "min_threshold": 50,
             "params": [execution_date.date() - timedelta(days=1)],
@@ -268,11 +433,11 @@ def validate_data_quality(**context) -> bool:
             "name": "data_consistency",
             "query": """
                 SELECT COUNT(*) as count
-                FROM prop_trading_model.raw_accounts_data a
-                JOIN prop_trading_model.raw_metrics_daily m
-                ON a.login = m.login
+                FROM prop_trading_model.raw_metrics_alltime a
+                JOIN prop_trading_model.raw_metrics_daily d
+                ON a.login = d.login
                 WHERE DATE(a.ingestion_timestamp) = %s
-                AND m.metric_date = %s
+                AND d.date = %s
             """,
             "min_threshold": 30,
             "params": [
@@ -319,10 +484,10 @@ def cleanup_old_data(**context) -> None:
         DELETE FROM prop_trading_model.pipeline_execution_log
         WHERE execution_date < CURRENT_DATE - INTERVAL '30 days'
         """,
-        # Clean up old raw data (keep 90 days)
+        # Clean up old raw data (keep 90 days) - updated table name
         """
         DELETE FROM prop_trading_model.raw_metrics_daily
-        WHERE metric_date < CURRENT_DATE - INTERVAL '90 days'
+        WHERE date < CURRENT_DATE - INTERVAL '90 days'
         """,
         # Clean up old predictions (keep 180 days)
         """
@@ -381,13 +546,70 @@ data_freshness_check = PythonOperator(
     dag=dag,
 )
 
-# Schema creation (idempotent)
-create_schema = BashOperator(
+# Schema creation using Alembic (idempotent)
+def ensure_schema_with_alembic(**context):
+    """Ensure database schema is up to date using Alembic."""
+    import sys
+    from pathlib import Path
+    
+    # Add src directory to path
+    src_dir = Path(__file__).parent.parent / "src"
+    sys.path.append(str(src_dir))
+    
+    try:
+        from utils.enhanced_alembic_schema_manager import create_enhanced_alembic_schema_manager
+        from utils.database import get_db_manager
+        
+        # Get database manager
+        db_manager = get_db_manager()
+        
+        # Create Enhanced Alembic schema manager
+        schema_manager = create_enhanced_alembic_schema_manager(db_manager)
+        
+        # Schema file path
+        schema_file = src_dir / "db_schema" / "schema.sql"
+        
+        # Ensure schema compliance
+        result = schema_manager.ensure_schema_compliance(
+            schema_path=schema_file,
+            preserve_data=True,
+            dry_run=False
+        )
+        
+        if result['success']:
+            if result['migration_needed']:
+                logger.info(f"Schema migration completed successfully with Alembic")
+                if 'new_revision' in result:
+                    logger.info(f"New migration revision: {result['new_revision']}")
+            else:
+                logger.info("Database schema is already compliant")
+        else:
+            raise Exception(f"Schema migration failed: {result.get('error', 'Unknown error')}")
+            
+    except ImportError as e:
+        logger.warning(f"Alembic not available ({str(e)}), falling back to basic schema creation")
+        # Fallback to basic schema creation
+        from utils.database import get_db_manager
+        
+        db_manager = get_db_manager()
+        schema_file = src_dir / "db_schema" / "schema.sql"
+        
+        if not schema_file.exists():
+            raise FileNotFoundError(f"Schema file not found: {schema_file}")
+        
+        with open(schema_file, "r") as f:
+            schema_sql = f.read()
+        
+        with db_manager.model_db.get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(schema_sql)
+                conn.commit()
+        
+        logger.info("Database schema created using fallback method")
+
+create_schema = PythonOperator(
     task_id="create_schema",
-    bash_command="""
-    cd {{ params.src_dir }} && python -m db_schema.create_schema --log-level INFO
-    """,
-    params={"src_dir": "/opt/airflow/dags/src"},
+    python_callable=ensure_schema_with_alembic,
     dag=dag,
 )
 
@@ -425,7 +647,7 @@ ingest_regimes = PipelineOperator(
 ingest_metrics_alltime = PipelineOperator(
     task_id="ingest_metrics_alltime",
     stage_name="ingest_metrics_alltime",
-    module_path="data_ingestion.ingest_metrics_intelligent",
+    module_path="data_ingestion.ingest_metrics",
     stage_args=["alltime", "--log-level", "INFO"],
     dag=dag,
     pool="ingestion_pool",
@@ -434,7 +656,7 @@ ingest_metrics_alltime = PipelineOperator(
 ingest_metrics_daily = PipelineOperator(
     task_id="ingest_metrics_daily",
     stage_name="ingest_metrics_daily",
-    module_path="data_ingestion.ingest_metrics_intelligent",
+    module_path="data_ingestion.ingest_metrics",
     stage_args=[
         "daily",
         "--start-date",
@@ -451,7 +673,7 @@ ingest_metrics_daily = PipelineOperator(
 ingest_metrics_hourly = PipelineOperator(
     task_id="ingest_metrics_hourly",
     stage_name="ingest_metrics_hourly",
-    module_path="data_ingestion.ingest_metrics_intelligent",
+    module_path="data_ingestion.ingest_metrics",
     stage_args=[
         "hourly",
         "--start-date",
@@ -466,7 +688,7 @@ ingest_metrics_hourly = PipelineOperator(
 ingest_trades_open = PipelineOperator(
     task_id="ingest_trades_open",
     stage_name="ingest_trades_open",
-    module_path="data_ingestion.ingest_trades_intelligent",
+    module_path="data_ingestion.ingest_trades",
     stage_args=[
         "open",
         "--end-date",
@@ -481,7 +703,7 @@ ingest_trades_open = PipelineOperator(
 ingest_trades_closed = PipelineOperator(
     task_id="ingest_trades_closed",
     stage_name="ingest_trades_closed",
-    module_path="data_ingestion.ingest_trades_intelligent",
+    module_path="data_ingestion.ingest_trades",
     stage_args=[
         "closed",
         "--start-date",
@@ -503,10 +725,10 @@ ingestion_complete = EmptyOperator(
     trigger_rule=TriggerRule.ALL_SUCCESS,
 )
 
-# Data quality validation
+# Enhanced data quality validation with Great Expectations
 data_quality_check = PythonOperator(
     task_id="data_quality_check",
-    python_callable=validate_data_quality,
+    python_callable=validate_data_quality_with_great_expectations,
     dag=dag,
 )
 

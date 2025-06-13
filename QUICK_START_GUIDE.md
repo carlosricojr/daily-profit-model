@@ -1,6 +1,6 @@
 # Daily Profit Model - Quick Start Guide
 
-This guide helps you test the entire intelligent ML pipeline with one week of data to ensure everything works before processing larger datasets. The intelligent pipeline only fetches missing data, making it much faster than traditional approaches.
+This guide helps you test the entire ML pipeline with one week of data to ensure everything works before processing larger datasets. The  pipeline only fetches missing data, making it much faster than traditional approaches.
 
 ## Prerequisites
 
@@ -46,10 +46,10 @@ psql -d daily_profit_model -f src/db_schema/schema.sql
 psql -d daily_profit_model -c "\dt prop_trading_model.*"
 ```
 
-### Option B: Using Intelligent Pipeline Orchestrator
+### Option B: Using  Pipeline Orchestrator
 ```bash
-# Let the intelligent pipeline create schema
-uv run --env-file .env -- python -m src.pipeline_orchestration.run_pipeline_intelligent --stages schema
+# Let the  pipeline create schema
+uv run --env-file .env -- python -m src.pipeline_orchestration.run_pipeline_ --stages schema
 ```
 
 ### Expected Tables
@@ -79,20 +79,20 @@ END_DATE=$(date -v-1d +%Y-%m-%d)
 echo "Testing from $START_DATE to $END_DATE"
 ```
 
-## 4. Quick Test (Intelligent Pipeline)
+## 4. Quick Test ( Pipeline)
 
-Run this for the fastest validation with intelligent data fetching:
+Run this for the fastest validation with  data fetching:
 
 ```bash
-# 1. Intelligent metrics ingestion (only fetches missing data)
+# 1.  metrics ingestion (only fetches missing data)
 # This automatically discovers missing daily dates, extracts account IDs, 
 # updates alltime for those accounts, and fills missing hourly data with
 # precise hour-level detection (only fetches specific missing hours)
-uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics_intelligent \
+uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics \
     --start-date $START_DATE --end-date $END_DATE
 
-# 2. Intelligent trades ingestion (only fetches missing data)
-uv run --env-file .env -- python -m src.data_ingestion.ingest_trades_intelligent closed \
+# 2.  trades ingestion (only fetches missing data)
+uv run --env-file .env -- python -m src.data_ingestion.ingest_trades_ closed \
     --start-date $START_DATE --end-date $END_DATE
 
 # 3. Create staging snapshots
@@ -115,7 +115,7 @@ uv run --env-file .env -- python -m src.modeling.predict_daily
 
 ### Alternative: Legacy Individual Component Approach (Less Efficient)
 ```bash
-# Note: The intelligent pipeline combines these steps automatically
+# Note: The  pipeline combines these steps automatically
 # Only use if you need granular control over individual components
 
 # Legacy account discovery
@@ -128,8 +128,8 @@ ACTIVE_LOGINS=$(uv run --env-file .env -- python -m src.data_ingestion.discover_
 For comprehensive testing including all data sources:
 
 ```bash
-# Run complete intelligent pipeline
-uv run --env-file .env -- python -m src.pipeline_orchestration.run_pipeline_intelligent \
+# Run complete  pipeline
+uv run --env-file .env -- python -m src.pipeline_orchestration.run_pipeline_ \
     --start-date $START_DATE \
     --end-date $END_DATE \
     --log-level INFO
@@ -138,8 +138,8 @@ uv run --env-file .env -- python -m src.pipeline_orchestration.run_pipeline_inte
 Or run specific stages:
 
 ```bash
-# Just intelligent ingestion and preprocessing
-uv run --env-file .env -- python -m src.pipeline_orchestration.run_pipeline_intelligent \
+# Just  ingestion and preprocessing
+uv run --env-file .env -- python -m src.pipeline_orchestration.run_pipeline_ \
     --stages ingestion preprocessing \
     --start-date $START_DATE \
     --end-date $END_DATE
@@ -253,16 +253,16 @@ check_status() {
     fi
 }
 
-# Run intelligent pipeline stages
-echo "1. Intelligent metrics ingestion (only missing data)..."
-uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics_intelligent \
+# Run  pipeline stages
+echo "1.  metrics ingestion (only missing data)..."
+uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics \
     --start-date $START_DATE --end-date $END_DATE
-check_status "Intelligent metrics ingestion"
+check_status " metrics ingestion"
 
-echo -e "\n2. Intelligent trades ingestion (only missing data)..."
-uv run --env-file .env -- python -m src.data_ingestion.ingest_trades_intelligent closed \
+echo -e "\n2.  trades ingestion (only missing data)..."
+uv run --env-file .env -- python -m src.data_ingestion.ingest_trades_ closed \
     --start-date $START_DATE --end-date $END_DATE
-check_status "Intelligent trades ingestion"
+check_status " trades ingestion"
 
 echo -e "\n3. Creating staging snapshots..."
 uv run --env-file .env -- python -m src.preprocessing.create_staging_snapshots \
@@ -286,7 +286,7 @@ echo -e "\n7. Generating predictions..."
 uv run --env-file .env -- python -m src.modeling.predict_daily
 check_status "Prediction generation"
 
-echo -e "\n✅ Intelligent pipeline test completed successfully!"
+echo -e "\n✅  pipeline test completed successfully!"
 echo "Check logs in: logs/daily_profit_model.log"
 ```
 
@@ -338,14 +338,14 @@ uv run --env-file .env -- python -m src.feature_engineering.engineer_features \
 
 ## 10. Performance Expectations
 
-### With Intelligent Data Ingestion (Recommended)
-Using intelligent missing data detection for 1 week of data:
-- **Intelligent Metrics Ingestion**: 30-60 seconds (only fetches missing daily/hourly data with precise hour-level detection)
-- **Intelligent Trades Ingestion**: 1-2 minutes (only fetches missing trades)
+### With  Data Ingestion (Recommended)
+Using  missing data detection for 1 week of data:
+- ** Metrics Ingestion**: 30-60 seconds (only fetches missing daily/hourly data with precise hour-level detection)
+- ** Trades Ingestion**: 1-2 minutes (only fetches missing trades)
 - **Preprocessing**: < 1 minute
 - **Feature Engineering**: 1-3 minutes (optimized)
 - **Model Training**: < 1 minute
-- **Total Intelligent Pipeline**: 3-7 minutes
+- **Total  Pipeline**: 3-7 minutes
 
 ### Hourly Metrics Optimization
 The new precise hourly detection brings significant improvements:
@@ -366,7 +366,7 @@ The new precise hourly detection brings significant improvements:
 - **Trades ingestion**: 10-15x faster (gap detection vs. full fetch)
 - **API calls**: Reduced from thousands to dozens of requests
 - **Data transfer**: Only fetch data that doesn't already exist
-- **Database operations**: Intelligent upserts prevent duplicate processing
+- **Database operations**:  upserts prevent duplicate processing
 - **Recovery friendly**: Automatically resumes from crash points
 
 ## 11. Next Steps
@@ -388,17 +388,17 @@ After successful test:
 # Check system health
 uv run --env-file .env -- python -m src.pipeline_orchestration.health_checks
 
-# Intelligent metrics ingestion (only fetches missing data)
-uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics_intelligent \
+#  metrics ingestion (only fetches missing data)
+uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics \
     --start-date 2024-01-01 --end-date 2024-01-07
 
-# Intelligent trades ingestion (only fetches missing data)
-uv run --env-file .env -- python -m src.data_ingestion.ingest_trades_intelligent closed \
+#  trades ingestion (only fetches missing data)
+uv run --env-file .env -- python -m src.data_ingestion.ingest_trades_ closed \
     --start-date 2024-01-01 --end-date 2024-01-07
-uv run --env-file .env -- python -m src.data_ingestion.ingest_trades_intelligent open
+uv run --env-file .env -- python -m src.data_ingestion.ingest_trades_ open
 
-# Full intelligent pipeline
-uv run --env-file .env -- python -m src.pipeline_orchestration.run_pipeline_intelligent \
+# Full  pipeline
+uv run --env-file .env -- python -m src.pipeline_orchestration.run_pipeline_ \
     --start-date 2024-01-01 --end-date 2024-01-07
 
 # Validate data quality
@@ -414,7 +414,7 @@ uv run --env-file .env -- python -m src.feature_engineering.monitor_features
 
 ## Success Criteria
 
-Your intelligent pipeline test is successful when:
+Your  pipeline test is successful when:
 - ✅ All stages complete without errors
 - ✅ `pipeline_execution_log` shows 'success' status
 - ✅ Only missing data was fetched (check logs for "Found X missing..." messages)

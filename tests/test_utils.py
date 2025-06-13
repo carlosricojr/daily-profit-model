@@ -51,12 +51,22 @@ class TestLoggingConfig(unittest.TestCase):
 
         # Test different log levels
         for level in ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]:
-            # Clear handlers to avoid accumulation
-            logging.getLogger().handlers.clear()
+            # Properly close existing handlers before clearing
+            for handler in logging.getLogger().handlers[:]:
+                handler.close()
+                logging.getLogger().removeHandler(handler)
 
             setup_logging(log_level=level)
             # Check the root logger level since setup_logging configures the root logger
             self.assertEqual(logging.getLogger().level, getattr(logging, level))
+    
+    def tearDown(self):
+        """Clean up logging handlers after each test."""
+        import logging
+        # Close all handlers to prevent resource warnings
+        for handler in logging.getLogger().handlers[:]:
+            handler.close()
+            logging.getLogger().removeHandler(handler)
 
 
 class TestMetrics(unittest.TestCase):

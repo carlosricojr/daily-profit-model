@@ -1,5 +1,5 @@
 """
-Intelligent Schema Management System
+Schema Management System
 
 This module provides production-ready schema management with:
 - Automatic schema comparison and diff generation

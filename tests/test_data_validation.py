@@ -7,9 +7,14 @@ from datetime import date, datetime
 from unittest.mock import Mock
 import sys
 import os
+import warnings
 
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
+
+# Suppress deprecation warnings for DataValidator in tests
+# We still need to test the deprecated class
+warnings.filterwarnings("ignore", message="DataValidator is deprecated", category=DeprecationWarning)
 
 from preprocessing.data_validator import (
     DataValidator,
@@ -26,7 +31,9 @@ class TestDataValidator(unittest.TestCase):
         """Set up test fixtures."""
         self.mock_db_manager = Mock()
         self.mock_db_manager.model_db = Mock()
-        self.validator = DataValidator(self.mock_db_manager)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            self.validator = DataValidator(self.mock_db_manager)
         self.test_date = date(2024, 1, 15)
 
     def test_validate_staging_snapshot_no_data(self):
@@ -325,21 +332,27 @@ class TestEnhancedValidationFeatures(unittest.TestCase):
         """Set up enhanced test fixtures."""
         self.mock_db_manager = Mock()
         self.mock_db_manager.model_db = Mock()
-        self.validator = DataValidator(
-            self.mock_db_manager, enable_profiling=True, timeout_seconds=60
-        )
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            self.validator = DataValidator(
+                self.mock_db_manager, enable_profiling=True, timeout_seconds=60
+            )
 
     def test_enhanced_validator_initialization(self):
         """Test enhanced validator initialization with production features."""
         # Test default settings
-        validator_default = DataValidator(self.mock_db_manager)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            validator_default = DataValidator(self.mock_db_manager)
         self.assertTrue(validator_default.enable_profiling)
         self.assertEqual(validator_default.timeout_seconds, 300)
 
         # Test custom settings
-        validator_custom = DataValidator(
-            self.mock_db_manager, enable_profiling=False, timeout_seconds=120
-        )
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            validator_custom = DataValidator(
+                self.mock_db_manager, enable_profiling=False, timeout_seconds=120
+            )
         self.assertFalse(validator_custom.enable_profiling)
         self.assertEqual(validator_custom.timeout_seconds, 120)
 

@@ -192,7 +192,7 @@ class SchemaFieldMappingValidator:
         # Extract field mappings from the _init_field_mappings method
         # This is a simplified extraction - in production, you might use AST parsing
         
-        # Metrics field mappings (extracted from ingest_metrics_intelligent.py)
+        # Metrics field mappings (extracted from ingest_metrics.py)
         mappings['metrics_alltime'] = {
             'login': 'login',
             'accountId': 'account_id',
@@ -399,7 +399,7 @@ class SchemaFieldMappingValidator:
             'hour': 'hour'
         })
         
-        # Trades field mappings - based on actual ingest_trades_intelligent.py transform methods
+        # Trades field mappings - based on actual ingest_trades.py transform methods
         trades_mapping = {
             'tradeDate': 'trade_date',
             'broker': 'broker',

@@ -1,5 +1,6 @@
 """
 Great Expectations configuration and integration for data validation.
+Properly configured for the actual prop trading model database schema.
 """
 
 import os
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class GreatExpectationsValidator:
-    """Great Expectations integration for advanced data validation."""
+    """Great Expectations integration for advanced data validation aligned with actual schema."""
 
     def __init__(self, db_manager, data_dir: str = "great_expectations"):
         """Initialize Great Expectations validator."""
@@ -90,24 +91,28 @@ class GreatExpectationsValidator:
         self.context.add_datasource(**datasource_config)
 
     def _create_expectation_suites(self):
-        """Create expectation suites for different tables."""
-        # Create suite for staging snapshots
-        self._create_staging_snapshot_suite()
+        """Create expectation suites for different tables aligned with actual schema."""
+        # Core data tables
+        self._create_raw_metrics_alltime_suite()
+        self._create_raw_metrics_daily_suite()
+        self._create_raw_metrics_hourly_suite()
+        self._create_staging_snapshots_suite()
+        
+        # Trading data tables
+        self._create_raw_trades_closed_suite()
+        self._create_raw_trades_open_suite()
+        self._create_raw_plans_data_suite()
+        
+        # ML pipeline tables
+        self._create_model_training_input_suite()
+        self._create_model_predictions_suite()
 
-        # Create suite for raw accounts
-        self._create_raw_accounts_suite()
-
-        # Create suite for daily metrics
-        self._create_daily_metrics_suite()
-
-    def _create_staging_snapshot_suite(self):
-        """Create expectations for staging snapshots table."""
-        suite_name = "staging_snapshots_suite"
+    def _create_raw_metrics_alltime_suite(self):
+        """Create expectations for raw_metrics_alltime table (main account data)."""
+        suite_name = "raw_metrics_alltime_suite"
 
         try:
-            suite = self.context.get_expectation_suite(
-                expectation_suite_name=suite_name
-            )
+            suite = self.context.get_expectation_suite(expectation_suite_name=suite_name)
             logger.info(f"Loaded existing expectation suite: {suite_name}")
         except Exception:
             suite = self.context.create_expectation_suite(
@@ -115,9 +120,206 @@ class GreatExpectationsValidator:
             )
             logger.info(f"Created new expectation suite: {suite_name}")
 
-        # Define expectations
         expectations = [
-            # Completeness expectations
+            # Primary key and required fields
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_not_be_null",
+                kwargs={"column": "account_id"},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_not_be_null",
+                kwargs={"column": "login"},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_unique",
+                kwargs={"column": "account_id"},
+            ),
+            
+            # Account status validation
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_in_set",
+                kwargs={"column": "status", "value_set": [1, 2, 3]},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_in_set",
+                kwargs={"column": "phase", "value_set": [1, 2, 3, 4]},
+            ),
+            
+            # Balance validations
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "starting_balance", "min_value": 1000, "max_value": 1000000},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "current_balance", "min_value": 0, "max_value": 10000000},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "current_equity", "min_value": 0, "max_value": 10000000},
+            ),
+            
+            # Trading metrics validation
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "success_rate", "min_value": 0, "max_value": 100, "mostly": 0.99},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "profit_factor", "min_value": 0, "max_value": 100, "mostly": 0.95},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "num_trades", "min_value": 0, "max_value": 100000},
+            ),
+            
+            # Risk metrics validation
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "daily_sharpe", "min_value": -10, "max_value": 10, "mostly": 0.90},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "daily_sortino", "min_value": -10, "max_value": 10, "mostly": 0.90},
+            ),
+            
+            # Business logic validations
+            ExpectationConfiguration(
+                expectation_type="expect_column_pair_values_to_be_equal",
+                kwargs={"column_A": "gross_profit", "column_B": "gross_profit", "ignore_row_if": "either_value_is_missing"},
+                meta={"notes": "Gross profit should be non-negative"}
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_pair_values_to_be_equal", 
+                kwargs={"column_A": "gross_loss", "column_B": "gross_loss", "ignore_row_if": "either_value_is_missing"},
+                meta={"notes": "Gross loss should be non-positive"}
+            ),
+        ]
+
+        for expectation in expectations:
+            suite.add_expectation(expectation_configuration=expectation)
+
+        self.context.save_expectation_suite(expectation_suite=suite)
+
+    def _create_raw_metrics_daily_suite(self):
+        """Create expectations for raw_metrics_daily table."""
+        suite_name = "raw_metrics_daily_suite"
+
+        try:
+            suite = self.context.get_expectation_suite(expectation_suite_name=suite_name)
+        except Exception:
+            suite = self.context.create_expectation_suite(
+                expectation_suite_name=suite_name, overwrite_existing=True
+            )
+
+        expectations = [
+            # Composite primary key
+            ExpectationConfiguration(
+                expectation_type="expect_compound_columns_to_be_unique",
+                kwargs={"column_list": ["account_id", "date"]},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_not_be_null",
+                kwargs={"column": "date"},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_not_be_null",
+                kwargs={"column": "account_id"},
+            ),
+            
+            # Date validation
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={
+                    "column": "date",
+                    "min_value": "2020-01-01",
+                    "max_value": "2030-12-31",
+                    "parse_strings_as_datetimes": True,
+                },
+            ),
+            
+            # Performance metrics
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "success_rate", "min_value": 0, "max_value": 100, "mostly": 0.99},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "num_trades", "min_value": 0, "max_value": 1000},
+            ),
+            
+            # Data freshness check
+            ExpectationConfiguration(
+                expectation_type="expect_column_max_to_be_between",
+                kwargs={
+                    "column": "date",
+                    "min_value": "2024-01-01",
+                    "max_value": "2030-12-31",
+                    "parse_strings_as_datetimes": True,
+                },
+            ),
+        ]
+
+        for expectation in expectations:
+            suite.add_expectation(expectation_configuration=expectation)
+
+        self.context.save_expectation_suite(expectation_suite=suite)
+
+    def _create_raw_metrics_hourly_suite(self):
+        """Create expectations for raw_metrics_hourly table."""
+        suite_name = "raw_metrics_hourly_suite"
+
+        try:
+            suite = self.context.get_expectation_suite(expectation_suite_name=suite_name)
+        except Exception:
+            suite = self.context.create_expectation_suite(
+                expectation_suite_name=suite_name, overwrite_existing=True
+            )
+
+        expectations = [
+            # Composite primary key
+            ExpectationConfiguration(
+                expectation_type="expect_compound_columns_to_be_unique",
+                kwargs={"column_list": ["account_id", "date", "hour"]},
+            ),
+            
+            # Hour validation
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "hour", "min_value": 0, "max_value": 23},
+            ),
+            
+            # Datetime consistency
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_not_be_null",
+                kwargs={"column": "datetime"},
+            ),
+        ]
+
+        for expectation in expectations:
+            suite.add_expectation(expectation_configuration=expectation)
+
+        self.context.save_expectation_suite(expectation_suite=suite)
+
+    def _create_staging_snapshots_suite(self):
+        """Create expectations for stg_accounts_daily_snapshots table (corrected column names)."""
+        suite_name = "staging_snapshots_suite"
+
+        try:
+            suite = self.context.get_expectation_suite(expectation_suite_name=suite_name)
+        except Exception:
+            suite = self.context.create_expectation_suite(
+                expectation_suite_name=suite_name, overwrite_existing=True
+            )
+
+        expectations = [
+            # Primary key
+            ExpectationConfiguration(
+                expectation_type="expect_compound_columns_to_be_unique",
+                kwargs={"column_list": ["account_id", "snapshot_date"]},
+            ),
+            
+            # Required fields (using correct column names from schema)
             ExpectationConfiguration(
                 expectation_type="expect_column_values_to_not_be_null",
                 kwargs={"column": "account_id"},
@@ -128,179 +330,280 @@ class GreatExpectationsValidator:
             ),
             ExpectationConfiguration(
                 expectation_type="expect_column_values_to_not_be_null",
-                kwargs={"column": "date"},
+                kwargs={"column": "snapshot_date"},
             ),
-            ExpectationConfiguration(
-                expectation_type="expect_column_values_to_not_be_null",
-                kwargs={"column": "starting_balance"},
-            ),
-            # Validity expectations
+            
+            # Balance validations (using correct column names)
             ExpectationConfiguration(
                 expectation_type="expect_column_values_to_be_between",
-                kwargs={
-                    "column": "current_balance",
-                    "min_value": 0,
-                    "max_value": 10000000,
-                    "mostly": 0.99,
-                },
+                kwargs={"column": "balance", "min_value": 0, "max_value": 10000000, "mostly": 0.99},
             ),
             ExpectationConfiguration(
                 expectation_type="expect_column_values_to_be_between",
-                kwargs={
-                    "column": "profit_target_pct",
-                    "min_value": 0,
-                    "max_value": 100,
-                },
+                kwargs={"column": "equity", "min_value": 0, "max_value": 10000000, "mostly": 0.99},
+            ),
+            
+            # Percentage validations
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "profit_target_pct", "min_value": 0, "max_value": 100},
             ),
             ExpectationConfiguration(
                 expectation_type="expect_column_values_to_be_between",
                 kwargs={"column": "max_drawdown_pct", "min_value": 0, "max_value": 100},
             ),
+            
+            # Phase validation
             ExpectationConfiguration(
                 expectation_type="expect_column_values_to_be_in_set",
-                kwargs={
-                    "column": "phase",
-                    "value_set": ["Funded", "Challenge", "Verification"],
-                    "mostly": 0.99,
-                },
+                kwargs={"column": "phase", "value_set": [1, 2, 3, 4], "mostly": 0.99},
             ),
-            # Uniqueness expectations
+            
+            # Status validation
             ExpectationConfiguration(
-                expectation_type="expect_compound_columns_to_be_unique",
-                kwargs={"column_list": ["account_id", "date"]},
+                expectation_type="expect_column_values_to_be_in_set",
+                kwargs={"column": "status", "value_set": [1, 2, 3], "mostly": 0.99},
             ),
-            # Statistical expectations
+        ]
+
+        for expectation in expectations:
+            suite.add_expectation(expectation_configuration=expectation)
+
+        self.context.save_expectation_suite(expectation_suite=suite)
+
+    def _create_raw_trades_closed_suite(self):
+        """Create expectations for raw_trades_closed table."""
+        suite_name = "raw_trades_closed_suite"
+
+        try:
+            suite = self.context.get_expectation_suite(expectation_suite_name=suite_name)
+        except Exception:
+            suite = self.context.create_expectation_suite(
+                expectation_suite_name=suite_name, overwrite_existing=True
+            )
+
+        expectations = [
+            # Required fields
             ExpectationConfiguration(
-                expectation_type="expect_column_mean_to_be_between",
-                kwargs={
-                    "column": "current_balance",
-                    "min_value": 10000,
-                    "max_value": 100000,
-                },
+                expectation_type="expect_column_values_to_not_be_null",
+                kwargs={"column": "login"},
             ),
             ExpectationConfiguration(
-                expectation_type="expect_column_stdev_to_be_between",
-                kwargs={
-                    "column": "current_balance",
-                    "min_value": 1000,
-                    "max_value": 50000,
-                },
+                expectation_type="expect_column_values_to_not_be_null",
+                kwargs={"column": "std_symbol"},
             ),
-            # Distribution expectations
             ExpectationConfiguration(
-                expectation_type="expect_column_quantile_values_to_be_between",
-                kwargs={
-                    "column": "current_balance",
-                    "quantile_ranges": {
-                        "quantiles": [0.05, 0.25, 0.5, 0.75, 0.95],
-                        "value_ranges": [
-                            [1000, 10000],
-                            [5000, 25000],
-                            [10000, 50000],
-                            [20000, 75000],
-                            [30000, 150000],
-                        ],
-                    },
-                },
+                expectation_type="expect_column_values_to_not_be_null",
+                kwargs={"column": "trade_date"},
             ),
-            # Relationship expectations
+            
+            # Side validation
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_in_set",
+                kwargs={"column": "side", "value_set": ["buy", "sell", "BUY", "SELL", "Buy", "Sell"]},
+            ),
+            
+            # Trade timing validation
             ExpectationConfiguration(
                 expectation_type="expect_column_pair_values_A_to_be_greater_than_B",
-                kwargs={
-                    "column_A": "days_since_first_trade",
-                    "column_B": "active_trading_days_count",
-                    "or_equal": True,
-                },
+                kwargs={"column_A": "close_time", "column_B": "open_time", "or_equal": False, "mostly": 0.99},
+            ),
+            
+            # Price validation
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "open_price", "min_value": 0.00001, "max_value": 1000000, "mostly": 0.99},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "close_price", "min_value": 0.00001, "max_value": 1000000, "mostly": 0.99},
+            ),
+            
+            # Volume validation
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "lots", "min_value": 0.01, "max_value": 1000, "mostly": 0.95},
             ),
         ]
 
-        # Add expectations to suite
         for expectation in expectations:
             suite.add_expectation(expectation_configuration=expectation)
 
         self.context.save_expectation_suite(expectation_suite=suite)
 
-    def _create_raw_accounts_suite(self):
-        """Create expectations for raw accounts table."""
-        suite_name = "raw_accounts_suite"
+    def _create_raw_trades_open_suite(self):
+        """Create expectations for raw_trades_open table."""
+        suite_name = "raw_trades_open_suite"
 
         try:
-            suite = self.context.get_expectation_suite(
-                expectation_suite_name=suite_name
-            )
+            suite = self.context.get_expectation_suite(expectation_suite_name=suite_name)
         except Exception:
             suite = self.context.create_expectation_suite(
                 expectation_suite_name=suite_name, overwrite_existing=True
             )
 
         expectations = [
+            # Similar to closed trades but for open positions
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_not_be_null",
+                kwargs={"column": "login"},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_not_be_null",
+                kwargs={"column": "std_symbol"},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_in_set",
+                kwargs={"column": "side", "value_set": ["buy", "sell", "BUY", "SELL", "Buy", "Sell"]},
+            ),
+        ]
+
+        for expectation in expectations:
+            suite.add_expectation(expectation_configuration=expectation)
+
+        self.context.save_expectation_suite(expectation_suite=suite)
+
+    def _create_raw_plans_data_suite(self):
+        """Create expectations for raw_plans_data table."""
+        suite_name = "raw_plans_data_suite"
+
+        try:
+            suite = self.context.get_expectation_suite(expectation_suite_name=suite_name)
+        except Exception:
+            suite = self.context.create_expectation_suite(
+                expectation_suite_name=suite_name, overwrite_existing=True
+            )
+
+        expectations = [
+            # Primary key
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_unique",
+                kwargs={"column": "plan_id"},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_not_be_null",
+                kwargs={"column": "plan_name"},
+            ),
+            
+            # Balance validation
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "starting_balance", "min_value": 1000, "max_value": 1000000},
+            ),
+            
+            # Percentage validations
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "profit_target_pct", "min_value": 1, "max_value": 50},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "max_drawdown_pct", "min_value": 1, "max_value": 50},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "profit_share_pct", "min_value": 50, "max_value": 100},
+            ),
+        ]
+
+        for expectation in expectations:
+            suite.add_expectation(expectation_configuration=expectation)
+
+        self.context.save_expectation_suite(expectation_suite=suite)
+
+    def _create_model_training_input_suite(self):
+        """Create expectations for model_training_input table (ML features)."""
+        suite_name = "model_training_input_suite"
+
+        try:
+            suite = self.context.get_expectation_suite(expectation_suite_name=suite_name)
+        except Exception:
+            suite = self.context.create_expectation_suite(
+                expectation_suite_name=suite_name, overwrite_existing=True
+            )
+
+        expectations = [
+            # Primary key
+            ExpectationConfiguration(
+                expectation_type="expect_compound_columns_to_be_unique",
+                kwargs={"column_list": ["account_id", "prediction_date"]},
+            ),
+            
+            # Required ML features
             ExpectationConfiguration(
                 expectation_type="expect_column_values_to_not_be_null",
                 kwargs={"column": "account_id"},
             ),
             ExpectationConfiguration(
-                expectation_type="expect_column_values_to_be_in_set",
-                kwargs={"column": "breached", "value_set": [0, 1]},
+                expectation_type="expect_column_values_to_not_be_null",
+                kwargs={"column": "prediction_date"},
             ),
             ExpectationConfiguration(
-                expectation_type="expect_column_values_to_be_in_set",
-                kwargs={"column": "is_upgraded", "value_set": [0, 1]},
+                expectation_type="expect_column_values_to_not_be_null",
+                kwargs={"column": "feature_date"},
             ),
+            
+            # Feature validation ranges
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "win_rate_5d", "min_value": 0, "max_value": 100, "mostly": 0.90},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "sharpe_ratio_5d", "min_value": -10, "max_value": 10, "mostly": 0.90},
+            ),
+            
+            # Target variable validation
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "target_net_profit", "min_value": -100000, "max_value": 100000, "mostly": 0.95},
+            ),
+            
+            # Feature-target temporal consistency
+            ExpectationConfiguration(
+                expectation_type="expect_column_pair_values_A_to_be_greater_than_B",
+                kwargs={"column_A": "prediction_date", "column_B": "feature_date", "or_equal": False},
+                meta={"notes": "Prediction date must be after feature date to prevent lookahead bias"}
+            ),
+        ]
+
+        for expectation in expectations:
+            suite.add_expectation(expectation_configuration=expectation)
+
+        self.context.save_expectation_suite(expectation_suite=suite)
+
+    def _create_model_predictions_suite(self):
+        """Create expectations for model_predictions table."""
+        suite_name = "model_predictions_suite"
+
+        try:
+            suite = self.context.get_expectation_suite(expectation_suite_name=suite_name)
+        except Exception:
+            suite = self.context.create_expectation_suite(
+                expectation_suite_name=suite_name, overwrite_existing=True
+            )
+
+        expectations = [
+            # Primary key
+            ExpectationConfiguration(
+                expectation_type="expect_compound_columns_to_be_unique",
+                kwargs={"column_list": ["model_version", "prediction_date", "account_id"]},
+            ),
+            
+            # Probability validation
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "predicted_profit_probability", "min_value": 0, "max_value": 1},
+            ),
+            ExpectationConfiguration(
+                expectation_type="expect_column_values_to_be_between",
+                kwargs={"column": "prediction_confidence", "min_value": 0, "max_value": 1},
+            ),
+            
+            # Model version format
             ExpectationConfiguration(
                 expectation_type="expect_column_values_to_match_regex",
-                kwargs={"column": "account_id", "regex": "^[A-Za-z0-9_-]+$"},
-            ),
-        ]
-
-        for expectation in expectations:
-            suite.add_expectation(expectation_configuration=expectation)
-
-        self.context.save_expectation_suite(expectation_suite=suite)
-
-    def _create_daily_metrics_suite(self):
-        """Create expectations for daily metrics table."""
-        suite_name = "daily_metrics_suite"
-
-        try:
-            suite = self.context.get_expectation_suite(
-                expectation_suite_name=suite_name
-            )
-        except Exception:
-            suite = self.context.create_expectation_suite(
-                expectation_suite_name=suite_name, overwrite_existing=True
-            )
-
-        expectations = [
-            ExpectationConfiguration(
-                expectation_type="expect_column_values_to_not_be_null",
-                kwargs={"column": "date"},
-            ),
-            ExpectationConfiguration(
-                expectation_type="expect_column_values_to_not_be_null",
-                kwargs={"column": "account_id"},
-            ),
-            ExpectationConfiguration(
-                expectation_type="expect_column_values_to_be_between",
-                kwargs={
-                    "column": "win_rate",
-                    "min_value": 0,
-                    "max_value": 100,
-                    "mostly": 1.0,
-                },
-            ),
-            ExpectationConfiguration(
-                expectation_type="expect_column_sum_to_be_between",
-                kwargs={"column": "num_trades", "min_value": 0, "max_value": 1000000},
-            ),
-            # Custom expectation for trade consistency
-            ExpectationConfiguration(
-                expectation_type="expect_column_values_to_be_between",
-                kwargs={
-                    "column": "profit_factor",
-                    "min_value": 0,
-                    "max_value": 100,
-                    "mostly": 0.95,
-                },
+                kwargs={"column": "model_version", "regex": r"^v\d+\.\d+\.\d+$"},
             ),
         ]
 
@@ -326,20 +629,33 @@ class GreatExpectationsValidator:
         Returns:
             Validation results dictionary
         """
-        # Map table names to suite names
+        # Updated mapping with correct table names
         suite_mapping = {
+            "raw_metrics_alltime": "raw_metrics_alltime_suite",
+            "raw_metrics_daily": "raw_metrics_daily_suite", 
+            "raw_metrics_hourly": "raw_metrics_hourly_suite",
             "stg_accounts_daily_snapshots": "staging_snapshots_suite",
-            "raw_accounts_data": "raw_accounts_suite",
-            "raw_metrics_daily": "daily_metrics_suite",
+            "raw_trades_closed": "raw_trades_closed_suite",
+            "raw_trades_open": "raw_trades_open_suite",
+            "raw_plans_data": "raw_plans_data_suite",
+            "model_training_input": "model_training_input_suite",
+            "model_predictions": "model_predictions_suite",
         }
 
         suite_name = suite_mapping.get(table_name)
         if not suite_name:
             raise ValueError(f"No expectation suite defined for table: {table_name}")
 
-        # Create batch request
+        # Create batch request with appropriate date filtering
         if date_filter:
-            query = f"SELECT * FROM {schema}.{table_name} WHERE date = '{date_filter}'"
+            if table_name in ["raw_metrics_daily", "raw_metrics_hourly"]:
+                query = f"SELECT * FROM {schema}.{table_name} WHERE date = '{date_filter}'"
+            elif table_name in ["raw_trades_closed", "raw_trades_open"]:
+                query = f"SELECT * FROM {schema}.{table_name} WHERE trade_date = '{date_filter}'"
+            elif table_name == "stg_accounts_daily_snapshots":
+                query = f"SELECT * FROM {schema}.{table_name} WHERE snapshot_date = '{date_filter}'"
+            else:
+                query = f"SELECT * FROM {schema}.{table_name} LIMIT 10000"
         else:
             query = f"SELECT * FROM {schema}.{table_name} LIMIT 10000"
 
@@ -455,3 +771,51 @@ class GreatExpectationsValidator:
         # Sort by run time and limit
         suite_validations.sort(key=lambda x: x["run_time"], reverse=True)
         return suite_validations[:limit]
+
+    def validate_ml_pipeline_data_quality(self, prediction_date: date) -> Dict[str, Any]:
+        """
+        Comprehensive ML pipeline data quality validation.
+        
+        Args:
+            prediction_date: Date for which to validate ML pipeline data
+            
+        Returns:
+            Comprehensive validation results for ML pipeline
+        """
+        results = {}
+        
+        # Validate core data tables
+        core_tables = [
+            "raw_metrics_alltime",
+            "raw_metrics_daily", 
+            "raw_trades_closed",
+            "stg_accounts_daily_snapshots"
+        ]
+        
+        for table in core_tables:
+            try:
+                results[table] = self.validate_table(table, date_filter=prediction_date)
+            except Exception as e:
+                results[table] = {"success": False, "error": str(e)}
+        
+        # Validate ML-specific tables
+        ml_tables = ["model_training_input", "model_predictions"]
+        for table in ml_tables:
+            try:
+                results[table] = self.validate_table(table, date_filter=prediction_date)
+            except Exception as e:
+                results[table] = {"success": False, "error": str(e)}
+        
+        # Overall pipeline health
+        total_validations = sum(r.get("total_expectations", 0) for r in results.values() if isinstance(r, dict))
+        successful_validations = sum(r.get("successful_expectations", 0) for r in results.values() if isinstance(r, dict))
+        
+        results["pipeline_summary"] = {
+            "overall_success": all(r.get("success", False) for r in results.values() if isinstance(r, dict)),
+            "total_expectations": total_validations,
+            "successful_expectations": successful_validations,
+            "success_rate": successful_validations / total_validations if total_validations > 0 else 0,
+            "validation_date": prediction_date.isoformat(),
+        }
+        
+        return results
