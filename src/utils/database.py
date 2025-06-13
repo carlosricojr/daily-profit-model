@@ -96,6 +96,11 @@ class DatabaseConnection:
                 cur.execute(query, params or {})
                 return cur.rowcount
     
+    # Alias used by some higher-level modules/tests
+    def execute_update(self, query: str, params: Optional[Dict[str, Any]] = None) -> int:  # noqa: N802
+        """Alias for execute_command for backward-/cross-module compatibility."""
+        return self.execute_command(query, params)
+    
     def insert_batch(self, table: str, data: List[Dict[str, Any]], 
                     returning: Optional[str] = None) -> Optional[List[Any]]:
         """Batch insert data into a table."""
