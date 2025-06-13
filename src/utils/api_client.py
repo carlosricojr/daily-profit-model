@@ -278,7 +278,7 @@ class RiskAnalyticsAPIClient:
         self,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
-        requests_per_second: float = 10,
+        requests_per_second: float = 15,
         burst_size: int = 20,
         pool_size: int = 10,
         max_retries: int = 3,
@@ -783,6 +783,10 @@ class RiskAnalyticsAPIClient:
         metric_type: str,
         logins: Optional[List[str]] = None,
         account_ids: Optional[List[str]] = None,
+        types: Optional[List[int]] = None,
+        phases: Optional[List[int]] = None,
+        providers: Optional[List[int]] = None,
+        platforms: Optional[List[int]] = None,
         dates: Optional[List[str]] = None,
         hours: Optional[List[int]] = None,
         limit: Optional[int] = None,
@@ -809,7 +813,15 @@ class RiskAnalyticsAPIClient:
             params["logins"] = ",".join(logins)
         if account_ids:
             params["accountIds"] = ",".join(account_ids)
-        if dates:
+        if types:
+            params["types"] = ",".join(map(str, types))
+        if phases:
+            params["phases"] = ",".join(map(str, phases))
+        if providers:
+            params["providers"] = ",".join(map(str, providers))
+        if platforms:
+            params["platforms"] = ",".join(map(str, platforms))
+        if dates and metric_type in ["hourly", "daily"]:
             params["dates"] = ",".join(dates)
         if hours and metric_type == "hourly":
             params["hours"] = ",".join(map(str, hours))
@@ -827,6 +839,7 @@ class RiskAnalyticsAPIClient:
         trade_type: str,
         logins: Optional[List[str]] = None,
         symbols: Optional[List[str]] = None,
+        trade_date: Optional[str] = None,
         open_time_from: Optional[str] = None,
         open_time_to: Optional[str] = None,
         close_time_from: Optional[str] = None,
@@ -842,6 +855,7 @@ class RiskAnalyticsAPIClient:
             trade_type: Type of trades ('closed' or 'open')
             logins: List of login IDs to filter
             symbols: List of symbols to filter
+            trade_date: Trade date in YYYYMMDD format
             open_time_from/to: Open time range in YYYYMMDD format
             close_time_from/to: Close time range in YYYYMMDD format (closed trades only)
             trade_date_from/to: Trade date range in YYYYMMDD format
@@ -859,6 +873,8 @@ class RiskAnalyticsAPIClient:
             params["symbols"] = ",".join(symbols)
 
         # Date filters
+        if trade_date:
+            params["trade-date"] = trade_date
         if open_time_from:
             params["open-time-from"] = open_time_from
         if open_time_to:

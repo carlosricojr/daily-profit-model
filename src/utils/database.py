@@ -6,7 +6,7 @@ import os
 import logging
 from typing import Optional, Any, Dict, List, Tuple
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor, execute_batch
 from sqlalchemy import create_engine, text, MetaData
@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import QueuePool
 import pandas as pd
 from dotenv import load_dotenv
+import json
 
 # Load environment variables
 load_dotenv()
@@ -37,13 +38,14 @@ class DatabaseConnection:
         self.schema = schema
         
         # Create SQLAlchemy engine
+        # Use up to 75% of available connections (150 out of 200)
         self.engine = create_engine(
             connection_string,
             poolclass=QueuePool,
-            pool_size=10,
-            max_overflow=20,
-            pool_pre_ping=True,
-            pool_recycle=3600,
+            pool_size=50,           # Base pool size
+            max_overflow=100,       # Additional connections when needed (50+100=150)
+            pool_pre_ping=True,     # Test connections before use
+            pool_recycle=3600,      # Recycle connections after 1 hour
             echo=False
         )
         
@@ -164,27 +166,68 @@ class DatabaseManager:
         
         logger.info("Database manager initialized")
     
-    def log_pipeline_execution(self, pipeline_name: str, status: str, 
-                             execution_time_seconds: float, 
-                             records_processed: int = 0,
-                             error_message: Optional[str] = None) -> None:
-        """Log pipeline execution details to the database."""
+    def log_pipeline_execution(
+        self,
+        pipeline_stage: str,
+        status: str,
+        execution_time_seconds: float,
+        records_processed: int = 0,
+        error_message: Optional[str] = None,
+        records_failed: int = 0,
+    ) -> None:
+        """Insert a row into prop_trading_model.pipeline_execution_log.
+
+        Simplest fix: write into the existing columns and stash the duration
+        inside execution_details JSON so we do **not** need to alter the table.
+        """
+
+        now_ts = datetime.utcnow()
+        end_ts: Optional[datetime]
+
+        if status.lower() == "running":
+            # No end-time yet – set to NULL so a later call can update / append
+            end_ts = None
+        else:
+            end_ts = now_ts + timedelta(seconds=execution_time_seconds)
+
+        execution_details = json.dumps({"execution_time_seconds": execution_time_seconds})
+
+        query = """
+            INSERT INTO prop_trading_model.pipeline_execution_log (
+                pipeline_stage,
+                execution_date,
+                start_time,
+                end_time,
+                status,
+                records_processed,
+                records_failed,
+                error_message,
+                execution_details
+            ) VALUES (
+                %(pipeline_stage)s,
+                CURRENT_DATE,
+                %(start_time)s,
+                %(end_time)s,
+                %(status)s,
+                %(records_processed)s,
+                %(records_failed)s,
+                %(error_message)s,
+                %(execution_details)s::jsonb
+            )
+        """
+
+        params = {
+            "pipeline_stage": pipeline_stage,
+            "start_time": now_ts,
+            "end_time": end_ts,
+            "status": status,
+            "records_processed": records_processed,
+            "records_failed": records_failed,
+            "error_message": error_message,
+            "execution_details": execution_details,
+        }
+
         try:
-            query = """
-                INSERT INTO prop_trading_model.pipeline_execution_log 
-                (pipeline_name, execution_date, status, execution_time_seconds, 
-                 records_processed, error_message)
-                VALUES (%(pipeline_name)s, %(execution_date)s, %(status)s, 
-                        %(execution_time_seconds)s, %(records_processed)s, %(error_message)s)
-            """
-            params = {
-                "pipeline_name": pipeline_name,
-                "execution_date": datetime.now(),
-                "status": status,
-                "execution_time_seconds": execution_time_seconds,
-                "records_processed": records_processed,
-                "error_message": error_message
-            }
             self.model_db.execute_command(query, params)
         except Exception as e:
             logger.error(f"Failed to log pipeline execution: {e}")

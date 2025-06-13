@@ -657,7 +657,7 @@ class AdvancedDailyPredictor:
         try:
             # Log pipeline execution start
             self.db_manager.log_pipeline_execution(
-                pipeline_stage="predict_daily_v2",
+                pipeline_stage="predict_daily",
                 execution_date=datetime.now().date(),
                 status="running",
             )
@@ -718,7 +718,7 @@ class AdvancedDailyPredictor:
 
             # Log successful completion
             self.db_manager.log_pipeline_execution(
-                pipeline_stage="predict_daily_v2",
+                pipeline_stage="predict_daily",
                 execution_date=datetime.now().date(),
                 status="success",
                 records_processed=len(predictions_df),
@@ -734,7 +734,7 @@ class AdvancedDailyPredictor:
 
         except Exception as e:
             self.db_manager.log_pipeline_execution(
-                pipeline_stage="predict_daily_v2",
+                pipeline_stage="predict_daily",
                 execution_date=datetime.now().date(),
                 status="failed",
                 error_message=str(e),
@@ -1248,7 +1248,7 @@ class AdvancedDailyPredictor:
             "duration_days": duration_days,
             "auto_promote": False,
             "comparison_metrics": ["mae", "direction_accuracy", "confidence"],
-            "created_by": "predict_daily_v2",
+            "created_by": "predict_daily",
         }
 
         deployment_id = self.shadow_manager.create_shadow_deployment(
@@ -1339,7 +1339,7 @@ def main():
     args = parser.parse_args()
 
     # Setup logging
-    setup_logging(log_level=args.log_level, log_file="predict_daily_v2")
+    setup_logging(log_level=args.log_level, log_file="predict_daily")
 
     # Create advanced predictor
     predictor = AdvancedDailyPredictor(model_version=args.model_version)

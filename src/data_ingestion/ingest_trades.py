@@ -8,13 +8,15 @@ import sys
 from datetime import datetime, timedelta, date
 from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.api_client import RiskAnalyticsAPIClient
-from utils.logging_config import get_logger, setup_logging
-from data_ingestion.base_ingester import BaseIngester, IngestionMetrics, CheckpointManager
+from utils.logging_config import get_logger, setup_logging, set_request_context
+from data_ingestion.base_ingester import BaseIngester, IngestionMetrics, CheckpointManager, timed_operation
 
 logger = get_logger(__name__)
 
@@ -62,8 +64,11 @@ class TradesIngester(BaseIngester):
             'batch_size': 5000,  # Larger batch for trades
             'max_retries': 3,
             'timeout': 30,
-            'date_batch_days': 7,  # Days to process at once for closed trades
+            'date_batch_days': 1,  # Days to process at once for closed trades
         })()
+
+        # Thread-safety helper for shared metrics
+        self.metrics_lock = threading.Lock()
 
         # Initialize API client
         self.api_client = RiskAnalyticsAPIClient()
@@ -88,6 +93,7 @@ class TradesIngester(BaseIngester):
             )
             self.metrics_by_type[trade_type.value] = IngestionMetrics()
 
+    @timed_operation("trades_ingest_main")
     def ingest_trades(
         self,
         trade_type: str,
@@ -118,14 +124,24 @@ class TradesIngester(BaseIngester):
         self.metrics = self.metrics_by_type[trade_type]
         self.checkpoint_manager = self.checkpoint_managers[trade_type]
         
+        # Update current table name and logging context so logs reflect the correct trade type
+        self.table_name = self.table_mapping[trade_type_enum]
+        try:
+            set_request_context(table_name=self.table_name)
+        except Exception:
+            # Fail silently if logging context utilities unavailable
+            pass
+        
         # Set default dates
         if not end_date:
             end_date = datetime.now().date() - timedelta(days=1)
         if not start_date:
-            if trade_type == "open":
-                start_date = end_date  # Open trades only need latest snapshot
+            # Auto-discover earliest trade date via API, else fallback 30d
+            earliest_api_date = self._find_first_trade_date_api(trade_type, logins, symbols)
+            if earliest_api_date:
+                start_date = earliest_api_date
             else:
-                start_date = end_date - timedelta(days=30)  # Default 30 days for closed
+                start_date = end_date - timedelta(days=30)
                 
         logger.info(f"Starting {trade_type} trades ingestion for {start_date} to {end_date}")
         
@@ -138,12 +154,12 @@ class TradesIngester(BaseIngester):
                 )
             else:
                 results = self._ingest_open_trades(
-                    end_date, logins, symbols, force_full_refresh
+                    start_date, end_date, logins, symbols, force_full_refresh
                 )
             
             # Batch resolve account IDs after ingestion
             logger.info(f"Resolving account IDs for {trade_type} trades...")
-            trades_updated = self._batch_resolve_account_ids(self.table_mapping[trade_type_enum])
+            trades_updated = self._batch_resolve_account_ids(self.table_name)
             results["account_ids_resolved"] = trades_updated
             
             # Log summary
@@ -181,20 +197,53 @@ class TradesIngester(BaseIngester):
             return {"closed_trades": 0}
         
         logger.info(f"Found {len(missing_ranges)} date ranges with missing data")
+
+        # Decide number of workers (I/O bound – don't exceed 8 to keep DB safe)
+        max_workers = min(8, len(missing_ranges))
+
+        if max_workers > 1:
+            logger.info(f"Processing missing ranges in parallel with {max_workers} workers")
+
+            def process_range(rng: Tuple[date, date]) -> int:
+                """Worker helper – new ingester instance avoids shared-state conflicts."""
+                sub_ing = TradesIngester(
+                    checkpoint_dir=self.checkpoint_dir,
+                    enable_validation=self.enable_validation,
+                    enable_deduplication=self.enable_deduplication,
+                )
+                try:
+                    recs = sub_ing._fetch_and_insert_closed_trades(
+                        rng[0], rng[1], logins, symbols
+                    )
+                    return recs
+                finally:
+                    sub_ing.close()
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {executor.submit(process_range, rng): rng for rng in missing_ranges}
+                for fut in as_completed(futures):
+                    rng = futures[fut]
+                    try:
+                        recs = fut.result()
+                        total_records += recs
+                        logger.info(f"Completed range {rng[0]} to {rng[1]} – {recs} records")
+                    except Exception as exc:
+                        logger.error(f"Range {rng} failed: {exc}")
+        else:
+            # Sequential fallback
+            for range_start, range_end in missing_ranges:
+                logger.info(f"Processing closed trades for {range_start} to {range_end}")
+                records = self._fetch_and_insert_closed_trades(
+                    range_start, range_end, logins, symbols
+                )
+                total_records += records
         
-        # Process each missing range
-        for range_start, range_end in missing_ranges:
-            logger.info(f"Processing closed trades for {range_start} to {range_end}")
-            records = self._fetch_and_insert_closed_trades(
-                range_start, range_end, logins, symbols
-            )
-            total_records += records
-            
         return {"closed_trades": total_records}
 
     def _ingest_open_trades(
         self,
-        trade_date: date,
+        start_date: date,
+        end_date: date,
         logins: Optional[List[str]],
         symbols: Optional[List[str]],
         force_full_refresh: bool,
@@ -202,17 +251,24 @@ class TradesIngester(BaseIngester):
         """
         Ingest open trades (daily snapshot).
         """
-        # Check if we already have this day's snapshot
-        if not force_full_refresh:
-            if self._has_open_trades_snapshot(trade_date, logins, symbols):
-                logger.info(f"Open trades snapshot already exists for {trade_date}")
-                return {"open_trades": 0}
-        
-        # Fetch and insert open trades
-        logger.info(f"Fetching open trades snapshot for {trade_date}")
-        records = self._fetch_and_insert_open_trades(trade_date, logins, symbols)
-        
-        return {"open_trades": records}
+        # Determine which dates need snapshots
+        if force_full_refresh:
+            missing_dates = [start_date + timedelta(days=i) for i in range((end_date - start_date).days + 1)]
+        else:
+            missing_dates = self._get_missing_open_trade_dates(start_date, end_date, logins, symbols)
+
+        if not missing_dates:
+            logger.info("All open-trade snapshots are up to date for the specified window")
+            return {"open_trades": 0}
+
+        total_inserted = 0
+
+        for day in missing_dates:
+            logger.info(f"Fetching open trades snapshot for {day}")
+            inserted = self._fetch_and_insert_open_trades(day, day, logins, symbols)
+            total_inserted += inserted
+
+        return {"open_trades": total_inserted}
 
     def _get_missing_closed_trade_date_ranges(
         self,
@@ -238,21 +294,17 @@ class TradesIngester(BaseIngester):
         
         where_clause = " AND ".join(conditions)
         
-        # Query to find dates with existing data
+        # More efficient anti-join that probes one partition per day
         query = f"""
-            WITH date_series AS (
-                SELECT generate_series(%s::date, %s::date, '1 day'::interval)::date AS date
-            ),
-            existing_dates AS (
-                SELECT DISTINCT trade_date as date
-                FROM prop_trading_model.raw_trades_closed
-                WHERE {where_clause}
+            SELECT gs.date
+            FROM generate_series(%s::date, %s::date, '1 day') AS gs(date)
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM prop_trading_model.raw_trades_closed rc
+                WHERE rc.trade_date = gs.date
+                  AND {where_clause}
             )
-            SELECT ds.date
-            FROM date_series ds
-            LEFT JOIN existing_dates ed ON ds.date = ed.date
-            WHERE ed.date IS NULL
-            ORDER BY ds.date
+            ORDER BY gs.date
         """
         
         results = self.db_manager.model_db.execute_query(
@@ -281,40 +333,7 @@ class TradesIngester(BaseIngester):
         
         return ranges
 
-    def _has_open_trades_snapshot(
-        self,
-        trade_date: date,
-        logins: Optional[List[str]],
-        symbols: Optional[List[str]],
-    ) -> bool:
-        """
-        Check if we already have open trades snapshot for the given date.
-        """
-        # Build filter conditions
-        conditions = ["trade_date = %s"]
-        params = [trade_date]
-        
-        if logins:
-            conditions.append("login = ANY(%s)")
-            params.append(logins)
-        if symbols:
-            conditions.append("std_symbol = ANY(%s)")
-            params.append(symbols)
-        
-        where_clause = " AND ".join(conditions)
-        
-        query = f"""
-            SELECT EXISTS (
-                SELECT 1
-                FROM prop_trading_model.raw_trades_open
-                WHERE {where_clause}
-                LIMIT 1
-            )
-        """
-        
-        result = self.db_manager.model_db.execute_query(query, params)
-        return result[0]["exists"] if result else False
-
+    @timed_operation("trades_fetch_and_insert_closed")
     def _fetch_and_insert_closed_trades(
         self,
         start_date: date,
@@ -359,14 +378,16 @@ class TradesIngester(BaseIngester):
                         if self.enable_validation:
                             is_valid, errors = self._validate_trade_record(trade, "closed")
                             if not is_valid:
-                                self.metrics.invalid_records += 1
+                                with self.metrics_lock:
+                                    self.metrics.invalid_records += 1
                                 logger.debug(f"Invalid trade: {errors}")
                                 continue
                         
                         # Transform and add to batch
                         record = self._transform_closed_trade(trade)
                         batch_data.append(record)
-                        self.metrics.total_records += 1
+                        with self.metrics_lock:
+                            self.metrics.total_records += 1
                         
                         # Insert when batch is full
                         if len(batch_data) >= self.config.batch_size:
@@ -400,7 +421,8 @@ class TradesIngester(BaseIngester):
 
     def _fetch_and_insert_open_trades(
         self,
-        trade_date: date,
+        start_date: date,
+        end_date: date,
         logins: Optional[List[str]],
         symbols: Optional[List[str]],
     ) -> int:
@@ -411,18 +433,19 @@ class TradesIngester(BaseIngester):
         total_records = 0
         
         try:
-            # Format date for API
-            date_str = self.api_client.format_date(trade_date)
+            # Format dates for API
+            start_str = self.api_client.format_date(start_date)
+            end_str = self.api_client.format_date(end_date)
             
-            logger.info(f"Fetching open trades for {trade_date}")
+            logger.info(f"Fetching open trades for {start_date} to {end_date}")
             
             for page_num, trades_page in enumerate(
                 self.api_client.get_trades(
                     trade_type="open",
                     logins=logins,
                     symbols=symbols,
-                    trade_date_from=date_str,
-                    trade_date_to=date_str,
+                    trade_date_from=start_str,
+                    trade_date_to=end_str,
                 )
             ):
                 logger.info(f"Processing page {page_num + 1} with {len(trades_page)} trades")
@@ -432,14 +455,16 @@ class TradesIngester(BaseIngester):
                     if self.enable_validation:
                         is_valid, errors = self._validate_trade_record(trade, "open")
                         if not is_valid:
-                            self.metrics.invalid_records += 1
+                            with self.metrics_lock:
+                                self.metrics.invalid_records += 1
                             logger.debug(f"Invalid trade: {errors}")
                             continue
                     
                     # Transform and add to batch
                     record = self._transform_open_trade(trade)
                     batch_data.append(record)
-                    self.metrics.total_records += 1
+                    with self.metrics_lock:
+                        self.metrics.total_records += 1
                     
                     # Insert when batch is full
                     if len(batch_data) >= self.config.batch_size:
@@ -458,6 +483,7 @@ class TradesIngester(BaseIngester):
         
         return self.metrics.new_records
 
+    @timed_operation("trades_insert_batch")
     def _insert_trades_batch(self, batch_data: List[Dict[str, Any]], trade_type: TradeType) -> int:
         """Insert batch with proper ON CONFLICT handling."""
         if not batch_data:
@@ -542,7 +568,8 @@ class TradesIngester(BaseIngester):
                     conn.commit()
                     
             # Update metrics
-            self.metrics.new_records += len(batch_data)
+            with self.metrics_lock:
+                self.metrics.new_records += len(batch_data)
             logger.debug(f"Inserted/updated {rows_affected} records into {table_name}")
             return len(batch_data)
             
@@ -550,6 +577,7 @@ class TradesIngester(BaseIngester):
             logger.error(f"Failed to insert batch: {str(e)}")
             raise
 
+    @timed_operation("trades_batch_resolve_account_ids")
     def _batch_resolve_account_ids(self, table_name: str) -> int:
         """
         Batch resolve account IDs for trades that don't have them.
@@ -820,6 +848,101 @@ class TradesIngester(BaseIngester):
                 self.db_manager.close()
         except Exception as e:
             logger.error(f"Error closing database manager: {str(e)}")
+
+    def _find_first_trade_date_api(
+        self,
+        trade_type: str,
+        logins: Optional[List[str]] = None,
+        symbols: Optional[List[str]] = None,
+        max_years: int = 10,
+    ) -> Optional[date]:
+        """Discover the earliest trade_date available from the API.
+
+        Fetches in 1-year windows moving backward until no data is found or
+        the max_years limit is reached.  Uses limit=1 for speed.
+        Returns the earliest date seen, or None on failure.
+        """
+        try:
+            today = datetime.now(datetime.UTC).date()
+            earliest_seen: Optional[date] = None
+
+            for year_back in range(max_years):
+                to_date = today - timedelta(days=year_back * 365)
+                from_date = to_date - timedelta(days=364)
+
+                # Format for API (YYYYMMDD)
+                from_str = self.api_client.format_date(from_date)
+                to_str = self.api_client.format_date(to_date)
+
+                pages = self.api_client.get_trades(
+                    trade_type=trade_type,
+                    logins=logins,
+                    symbols=symbols,
+                    trade_date_from=from_str,
+                    trade_date_to=to_str,
+                    limit=1,
+                )
+                try:
+                    first_page = next(pages)
+                except StopIteration:
+                    first_page = []
+
+                if not first_page:
+                    # No data in this window – if we've already seen data,
+                    # we can stop searching.
+                    if earliest_seen is not None:
+                        break
+                    continue
+
+                # Extract trade_date from the single record
+                rec_date_str = first_page[0].get("tradeDate")
+                if rec_date_str:
+                    try:
+                        rec_date = datetime.strptime(rec_date_str[:10], "%Y-%m-%d").date()
+                        if earliest_seen is None or rec_date < earliest_seen:
+                            earliest_seen = rec_date
+                    except Exception:
+                        pass
+
+            return earliest_seen
+        except Exception as e:
+            logger.error(f"Failed to discover earliest trade date via API: {e}")
+            return None
+
+    def _get_missing_open_trade_dates(
+        self,
+        start_date: date,
+        end_date: date,
+        logins: Optional[List[str]],
+        symbols: Optional[List[str]],
+    ) -> List[date]:
+        """Return individual dates between start_date and end_date for which we have no open-trade snapshot."""
+        conditions = ["trade_date BETWEEN %s AND %s"]
+        params: List[Any] = [start_date, end_date]
+
+        if logins:
+            conditions.append("login = ANY(%s)")
+            params.append(logins)
+        if symbols:
+            conditions.append("std_symbol = ANY(%s)")
+            params.append(symbols)
+
+        where_clause = " AND ".join(conditions)
+
+        query = f"""
+            SELECT gs.date
+            FROM generate_series(%s::date, %s::date, '1 day') AS gs(date)
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM prop_trading_model.raw_trades_open ro
+                WHERE ro.trade_date = gs.date
+                  AND {where_clause}
+            )
+            ORDER BY gs.date
+        """
+
+        results = self.db_manager.model_db.execute_query(query, [start_date, end_date] + params)
+        return [row["date"] for row in results]
 
 
 def main():

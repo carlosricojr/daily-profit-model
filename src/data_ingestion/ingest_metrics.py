@@ -11,16 +11,19 @@ from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
 import time
 from collections import defaultdict
+from itertools import product
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 # Ensure we can import from parent directories
 try:
-    from .base_ingester import BaseIngester, IngestionMetrics, CheckpointManager
+    from .base_ingester import BaseIngester, IngestionMetrics, CheckpointManager, timed_operation, TimedBlock
     from ..utils.api_client import RiskAnalyticsAPIClient
     from ..utils.logging_config import get_logger
 except ImportError:
     # Fallback for direct execution
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from data_ingestion.base_ingester import BaseIngester, IngestionMetrics, CheckpointManager
+    from data_ingestion.base_ingester import BaseIngester, IngestionMetrics, CheckpointManager, timed_operation, TimedBlock
     from utils.api_client import RiskAnalyticsAPIClient
     from utils.logging_config import get_logger
 
@@ -71,7 +74,7 @@ class MetricsIngester(BaseIngester):
             'batch_size': 1000,
             'max_retries': 3,
             'timeout': 30,
-            'alltime_batch_size': 50,     # For alltime metrics
+            'alltime_batch_size': 100,     # For alltime metrics - limited by URL length
             'hourly_batch_size': 25,      # For hourly metrics (more data per account)
             'daily_lookback_days': 90,    # How far back to check for daily gaps
             'hourly_lookback_days': 30,   # How far back to check for hourly gaps
@@ -421,6 +424,7 @@ class MetricsIngester(BaseIngester):
             **self.hourly_specific_fields
         }
 
+    @timed_operation("metrics_ingest_with_date_range")
     def ingest_with_date_range(
         self,
         start_date: date,
@@ -625,6 +629,7 @@ class MetricsIngester(BaseIngester):
         results = self.db_manager.model_db.execute_query(query)
         return [(row["account_id"], row["date"]) for row in results]
     
+    @timed_operation("metrics_ingest_hourly_optimized")
     def _ingest_hourly_optimized(
         self, 
         account_ids: List[str], 
@@ -699,7 +704,6 @@ class MetricsIngester(BaseIngester):
                         metric_type="hourly",
                         account_ids=batch_account_ids,
                         dates=batch_dates,
-                        hours=list(range(24)),  # Get all hours
                         limit=1000
                     )
                 ):
@@ -777,15 +781,25 @@ class MetricsIngester(BaseIngester):
                         COALESCE(rh.latest_hour, -1) as latest_hourly_hour
                     FROM account_daily_range adr
                     LEFT JOIN (
+                        -- First get the latest date per account, then get the max hour for that date
+                        WITH latest_dates AS (
+                            SELECT 
+                                account_id,
+                                MAX(date) as latest_date
+                            FROM prop_trading_model.raw_metrics_hourly
+                            WHERE account_id = ANY(%s)
+                            AND date BETWEEN %s AND %s
+                            GROUP BY account_id
+                        )
                         SELECT 
-                            account_id,
-                            MAX(date) as latest_date,
-                            MAX(CASE WHEN date = MAX(date) OVER (PARTITION BY account_id) 
-                                THEN hour END) as latest_hour
-                        FROM prop_trading_model.raw_metrics_hourly
-                        WHERE account_id = ANY(%s)
-                        AND date BETWEEN %s AND %s
-                        GROUP BY account_id
+                            ld.account_id,
+                            ld.latest_date,
+                            MAX(h.hour) as latest_hour
+                        FROM latest_dates ld
+                        LEFT JOIN prop_trading_model.raw_metrics_hourly h
+                            ON ld.account_id = h.account_id 
+                            AND ld.latest_date = h.date
+                        GROUP BY ld.account_id, ld.latest_date
                     ) rh ON adr.account_id = rh.account_id
                 )
                 SELECT 
@@ -827,22 +841,24 @@ class MetricsIngester(BaseIngester):
                 FROM prop_trading_model.raw_metrics_daily
                 WHERE date >= CURRENT_DATE - INTERVAL %s
             ),
+            latest_dates AS (
+                SELECT account_id, MAX(date) AS latest_date
+                FROM prop_trading_model.raw_metrics_hourly
+                WHERE date >= CURRENT_DATE - INTERVAL %s
+                GROUP BY account_id
+            ),
             latest_hourly_per_account AS (
                 SELECT 
                     raa.account_id,
-                    COALESCE(lh.latest_date, CURRENT_DATE - INTERVAL %s) as latest_date,
-                    COALESCE(lh.latest_hour, -1) as latest_hour
+                    COALESCE(ld.latest_date, CURRENT_DATE - INTERVAL %s) AS latest_date,
+                    COALESCE(lh.latest_hour, -1) AS latest_hour
                 FROM recent_active_accounts raa
-                LEFT JOIN (
-                    SELECT 
-                        account_id,
-                        MAX(date) as latest_date,
-                        MAX(CASE WHEN date = MAX(date) OVER (PARTITION BY account_id) 
-                            THEN hour END) as latest_hour
-                    FROM prop_trading_model.raw_metrics_hourly
-                    WHERE date >= CURRENT_DATE - INTERVAL %s
-                    GROUP BY account_id
-                ) lh ON raa.account_id = lh.account_id
+                LEFT JOIN latest_dates ld ON raa.account_id = ld.account_id
+                LEFT JOIN LATERAL (
+                    SELECT MAX(hour) AS latest_hour
+                    FROM prop_trading_model.raw_metrics_hourly h
+                    WHERE h.account_id = raa.account_id AND h.date = ld.latest_date
+                ) lh ON TRUE
             )
             SELECT 
                 account_id,
@@ -899,7 +915,6 @@ class MetricsIngester(BaseIngester):
                         metric_type="hourly",
                         account_ids=account_ids,
                         dates=date_range,
-                        hours=list(range(24)),
                         limit=1000
                     )
                 ):
@@ -971,32 +986,48 @@ class MetricsIngester(BaseIngester):
         results = self.db_manager.model_db.execute_query(query)
         return [dict(row) for row in results]
 
+    @timed_operation("metrics_ingest_alltime_for_accounts")
     def _ingest_alltime_for_accounts(self, account_ids: Optional[List[str]]) -> int:
         """Ingest alltime metrics for specific accounts (or all if None)."""
         total_records = 0
         
         if account_ids is None:
-            # Fetch all alltime metrics
-            logger.info("Fetching all alltime metrics...")
+            # Fetch all alltime metrics using parameter discovery and parallel processing
+            logger.info("Discovering valid parameter combinations for alltime metrics...")
             
-            for page_num, records in enumerate(
-                self.api_client.get_metrics(
-                    metric_type="alltime",
-                    limit=1000
-                )
-            ):
-                batch_data = []
-                logger.info(f"Processing page {page_num} with {len(records)} records")
-                
-                for record in records:
-                    transformed = self._transform_alltime_metric(record)
-                    batch_data.append(transformed)
-                
-                if batch_data:
-                    self._insert_batch_with_upsert(batch_data, MetricType.ALLTIME)
-                    total_records += len(batch_data)
+            # Discover all valid parameter values
+            valid_params = self._discover_valid_parameters(MetricType.ALLTIME)
+            logger.info(f"Discovered valid parameters: {valid_params}")
+            
+            # Generate all combinations
+            combinations = self._generate_parameter_combinations(valid_params)
+            logger.info(f"Found {len(combinations)} parameter combinations to process")
+            
+            # Handle case where no combinations are found
+            if not combinations:
+                logger.warning("No valid parameter combinations found, falling back to simple API call")
+                # Fallback to original simple approach
+                for page_num, records in enumerate(
+                    self.api_client.get_metrics(
+                        metric_type="alltime",
+                        limit=1000
+                    )
+                ):
+                    batch_data = []
+                    logger.info(f"Processing page {page_num} with {len(records)} records")
+                    
+                    for record in records:
+                        transformed = self._transform_alltime_metric(record)
+                        batch_data.append(transformed)
+                    
+                    if batch_data:
+                        self._insert_batch_with_upsert(batch_data, MetricType.ALLTIME)
+                        total_records += len(batch_data)
+            else:
+                # Process combinations in parallel
+                total_records = self._process_combinations_parallel(combinations, account_ids)
         else:
-            # Fetch in batches for specific accounts
+            # Fetch in batches for specific accounts (existing logic)
             batch_size = self.config.alltime_batch_size
             
             for i in range(0, len(account_ids), batch_size):
@@ -1012,8 +1043,7 @@ class MetricsIngester(BaseIngester):
                     for page_num, records in enumerate(
                         self.api_client.get_metrics(
                             metric_type="alltime",
-                            account_ids=batch,
-                            limit=50
+                            account_ids=batch
                         )
                     ):
                         for record in records:
@@ -1032,6 +1062,191 @@ class MetricsIngester(BaseIngester):
                     logger.error(f"Error processing alltime batch {batch_num}: {str(e)}")
                     continue
         
+        return total_records
+
+    def _discover_valid_parameters(self, metric_type: MetricType) -> Dict[str, List[int]]:
+        """Discover all valid parameter values for types, phases, providers, and platforms."""
+        parameters = ['types', 'phases', 'providers', 'platforms']
+        valid_params = {}
+        
+        # Parameter-specific starting values
+        start_values = {
+            'types': 1,
+            'phases': 1, 
+            'providers': 1,
+            'platforms': 4  # platforms starts at 4, not 1
+        }
+        
+        for param in parameters:
+            start_value = start_values.get(param, 1)
+            logger.info(f"Discovering valid values for parameter: {param} (starting from {start_value})")
+            valid_values = []
+            
+            # Test values starting from parameter-specific start value
+            value = start_value
+            max_attempts = 20  # Safety limit to avoid infinite loops
+            attempts = 0
+            
+            while attempts < max_attempts:
+                try:
+                    attempts += 1
+                    # Create kwargs for the API call
+                    kwargs = {
+                        'metric_type': metric_type.value,  # Convert enum to string
+                        'limit': 1,
+                        param: [value]  # API client expects lists
+                    }
+                    
+                    logger.debug(f"Testing {param}={value} with API call")
+                    
+                    # Make API call with single parameter
+                    has_results = False
+                    try:
+                        for page_num, records in enumerate(self.api_client.get_metrics(**kwargs)):
+                            logger.debug(f"Page {page_num}: got {len(records)} records for {param}={value}")
+                            if records:  # If we get any records
+                                has_results = True
+                                break
+                    except Exception as api_error:
+                        logger.warning(f"API error for {param}={value}: {str(api_error)}")
+                        break
+                    
+                    if has_results:
+                        valid_values.append(value)
+                        logger.info(f"Parameter {param}={value} returned results")
+                        value += 1
+                    else:
+                        logger.info(f"Parameter {param}={value} returned no results, stopping discovery")
+                        break
+                        
+                except Exception as e:
+                    logger.error(f"Error testing {param}={value}: {str(e)}")
+                    break
+            
+            if not valid_values:
+                logger.warning(f"No valid values found for parameter {param}")
+            
+            valid_params[param] = valid_values
+            logger.info(f"Found valid values for {param}: {valid_values}")
+        
+        return valid_params
+
+    def _generate_parameter_combinations(self, valid_params: Dict[str, List[int]]) -> List[Dict[str, int]]:
+        """Generate all possible combinations of valid parameters."""
+        # Filter out parameters with no valid values
+        filtered_params = {name: values for name, values in valid_params.items() if values}
+        
+        if not filtered_params:
+            logger.warning("No parameters have valid values - cannot generate combinations")
+            return []
+        
+        logger.info(f"Generating combinations from parameters: {filtered_params}")
+        
+        # Get parameter names and their valid values
+        param_names = list(filtered_params.keys())
+        param_values = [filtered_params[name] for name in param_names]
+        
+        # Generate all combinations
+        combinations = []
+        for combo in product(*param_values):
+            combination = dict(zip(param_names, combo))
+            combinations.append(combination)
+        
+        return combinations
+
+    def _process_combinations_parallel(self, combinations: List[Dict[str, int]], account_ids: Optional[List[str]]) -> int:
+        """Process parameter combinations in parallel using optimal number of workers."""
+        
+        # Determine optimal number of workers (I/O bound workload)
+        # For I/O bound tasks, we can use more workers than CPU cores
+        # Use up to 50 workers for large combination sets, but not more than the combinations themselves
+        
+        # Safeguard: ensure we have at least 1 combination
+        if len(combinations) == 0:
+            raise ValueError("No parameter combinations provided for parallel processing")
+        
+        cpu_count = os.cpu_count() or 16  # Default to 16 if cpu_count() returns None
+        
+        if len(combinations) <= 10:
+            max_workers = len(combinations)  # One worker per combination for small sets
+        else:
+            max_workers = min(50, len(combinations), cpu_count * 4)  # Scale up for larger sets
+        
+        # Final safeguard: ensure max_workers is at least 1
+        max_workers = max(1, max_workers)
+        
+        logger.info(f"Processing {len(combinations)} combinations with {max_workers} workers (CPU count: {cpu_count})")
+        
+        # Thread-safe counter for total records
+        total_records = 0
+        records_lock = threading.Lock()
+        
+        def process_combination(combination: Dict[str, int]) -> int:
+            """Process a single parameter combination."""
+            worker_records = 0
+            worker_id = threading.current_thread().name
+            
+            try:
+                logger.info(f"Worker {worker_id} processing combination: {combination}")
+                
+                # Create API parameters for this combination
+                # Convert single integers to lists as expected by API client
+                list_params = {param: [value] for param, value in combination.items()}
+                api_params = {
+                    'metric_type': 'alltime',
+                    'limit': 1000,
+                    **list_params
+                }
+                
+                if account_ids:
+                    api_params['account_ids'] = account_ids
+                
+                # Process pages for this combination
+                batch_data = []
+                for page_num, records in enumerate(self.api_client.get_metrics(**api_params)):
+                    logger.debug(f"Worker {worker_id} processing page {page_num} with {len(records)} records")
+                    
+                    for record in records:
+                        transformed = self._transform_alltime_metric(record)
+                        batch_data.append(transformed)
+                        
+                        # Insert in batches to avoid memory issues
+                        if len(batch_data) >= self.config.batch_size:
+                            self._insert_batch_with_upsert(batch_data, MetricType.ALLTIME)
+                            worker_records += len(batch_data)
+                            batch_data = []
+                
+                # Insert remaining records
+                if batch_data:
+                    self._insert_batch_with_upsert(batch_data, MetricType.ALLTIME)
+                    worker_records += len(batch_data)
+                
+                logger.info(f"Worker {worker_id} completed combination {combination}: {worker_records} records")
+                return worker_records
+                
+            except Exception as e:
+                logger.error(f"Worker {worker_id} failed processing combination {combination}: {str(e)}")
+                return 0
+        
+        # Execute combinations in parallel
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            future_to_combination = {
+                executor.submit(process_combination, combo): combo 
+                for combo in combinations
+            }
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_combination):
+                combination = future_to_combination[future]
+                try:
+                    worker_records = future.result()
+                    with records_lock:
+                        total_records += worker_records
+                except Exception as e:
+                    logger.error(f"Combination {combination} generated an exception: {str(e)}")
+        
+        logger.info(f"Parallel processing complete: {total_records} total records processed")
         return total_records
 
     def _ingest_daily_for_dates(self, dates: List[date]) -> int:
@@ -1129,6 +1344,7 @@ class MetricsIngester(BaseIngester):
         
         return total_records
 
+    @timed_operation("metrics_insert_batch_with_upsert")
     def _insert_batch_with_upsert(self, batch_data: List[Dict[str, Any]], metric_type: MetricType) -> int:
         """Insert batch with proper ON CONFLICT handling."""
         if not batch_data:

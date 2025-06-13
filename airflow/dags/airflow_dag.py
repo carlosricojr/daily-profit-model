@@ -546,9 +546,9 @@ data_freshness_check = PythonOperator(
     dag=dag,
 )
 
-# Schema creation using Alembic (idempotent)
-def ensure_schema_with_alembic(**context):
-    """Ensure database schema is up to date using Alembic."""
+# Schema creation (idempotent)
+def ensure_schema(**context):
+    """Ensure database schema exists."""
     import sys
     from pathlib import Path
     
@@ -556,60 +556,51 @@ def ensure_schema_with_alembic(**context):
     src_dir = Path(__file__).parent.parent / "src"
     sys.path.append(str(src_dir))
     
-    try:
-        from utils.enhanced_alembic_schema_manager import create_enhanced_alembic_schema_manager
-        from utils.database import get_db_manager
+    from utils.database import get_db_manager
+    
+    # Get database manager
+    db_manager = get_db_manager()
+    
+    # Schema file path
+    schema_file = src_dir / "db_schema" / "schema.sql"
+    
+    if not schema_file.exists():
+        raise FileNotFoundError(f"Schema file not found: {schema_file}")
+    
+    # Check if key tables exist
+    tables_to_check = [
+        "raw_metrics_daily", "raw_metrics_hourly", "raw_metrics_alltime",
+        "raw_trades_closed", "raw_trades_open", "raw_regimes_daily",
+        "stg_accounts_daily_snapshots", "feature_store_account_daily",
+        "model_registry", "model_predictions"
+    ]
+    
+    missing_tables = []
+    for table in tables_to_check:
+        if not db_manager.model_db.table_exists(table):
+            missing_tables.append(table)
+    
+    if missing_tables:
+        logger.warning(f"Missing tables: {missing_tables}")
+        logger.info("Creating database schema...")
         
-        # Get database manager
-        db_manager = get_db_manager()
-        
-        # Create Enhanced Alembic schema manager
-        schema_manager = create_enhanced_alembic_schema_manager(db_manager)
-        
-        # Schema file path
-        schema_file = src_dir / "db_schema" / "schema.sql"
-        
-        # Ensure schema compliance
-        result = schema_manager.ensure_schema_compliance(
-            schema_path=schema_file,
-            preserve_data=True,
-            dry_run=False
-        )
-        
-        if result['success']:
-            if result['migration_needed']:
-                logger.info(f"Schema migration completed successfully with Alembic")
-                if 'new_revision' in result:
-                    logger.info(f"New migration revision: {result['new_revision']}")
-            else:
-                logger.info("Database schema is already compliant")
-        else:
-            raise Exception(f"Schema migration failed: {result.get('error', 'Unknown error')}")
-            
-    except ImportError as e:
-        logger.warning(f"Alembic not available ({str(e)}), falling back to basic schema creation")
-        # Fallback to basic schema creation
-        from utils.database import get_db_manager
-        
-        db_manager = get_db_manager()
-        schema_file = src_dir / "db_schema" / "schema.sql"
-        
-        if not schema_file.exists():
-            raise FileNotFoundError(f"Schema file not found: {schema_file}")
-        
+        # Read schema file
         with open(schema_file, "r") as f:
             schema_sql = f.read()
         
+        # Execute schema creation
         with db_manager.model_db.get_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(schema_sql)
                 conn.commit()
         
-        logger.info("Database schema created using fallback method")
+        logger.info("Database schema created successfully")
+    else:
+        logger.info("Database schema is already compliant. All tables exist.")
 
 create_schema = PythonOperator(
     task_id="create_schema",
-    python_callable=ensure_schema_with_alembic,
+    python_callable=ensure_schema,
     dag=dag,
 )
 

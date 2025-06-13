@@ -734,7 +734,7 @@ CREATE TABLE raw_trades_closed (
     broker INTEGER,
     manager INTEGER,
     platform INTEGER,
-    ticket INTEGER,
+    ticket VARCHAR(255),
     position VARCHAR(255),
     login VARCHAR(255) NOT NULL,
     account_id VARCHAR(255), -- Nullable to handle cases where we only have login initially
@@ -800,10 +800,10 @@ CREATE INDEX idx_raw_trades_closed_login_platform_broker ON raw_trades_closed(lo
 -- Raw trades open
 CREATE TABLE raw_trades_open (
     trade_date DATE NOT NULL,
-    broker VARCHAR(255),
-    manager VARCHAR(255),
-    platform VARCHAR(255),
-    ticket VARCHAR(255),
+    broker INTEGER,
+    manager INTEGER,
+    platform INTEGER,
+    ticket VARCHAR(255),  -- Keep as VARCHAR since API can send string or integer
     position VARCHAR(255),
     login VARCHAR(255) NOT NULL,
     account_id VARCHAR(255), -- Nullable to handle cases where we only have login initially

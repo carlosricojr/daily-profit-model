@@ -29,7 +29,7 @@ class SchemaFieldMappingValidator:
     def __init__(self):
         self.project_root = Path(__file__).parent.parent
         self.schema_path = self.project_root / "src" / "db_schema" / "schema.sql"
-        self.data_structures_path = self.project_root / "ai-docs" / "data-structures.md"
+        self.data_structures_path = self.project_root / "ai-docs" / "api-docs" / "data-structures.md"
         
         # Fields that are database-specific (not from API)
         self.db_only_fields = {"ingestion_timestamp", "source_api_endpoint"}

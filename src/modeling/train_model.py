@@ -274,7 +274,7 @@ class EnhancedModelTrainer:
         try:
             # Log pipeline execution start
             self.db_manager.log_pipeline_execution(
-                pipeline_stage="train_model_v1",
+                pipeline_stage="train_model",
                 execution_date=datetime.now().date(),
                 status="running",
             )
@@ -384,7 +384,7 @@ class EnhancedModelTrainer:
 
             # Log successful completion
             self.db_manager.log_pipeline_execution(
-                pipeline_stage="train_model_v1",
+                pipeline_stage="train_model",
                 execution_date=datetime.now().date(),
                 status="success",
                 execution_details={
@@ -431,7 +431,7 @@ class EnhancedModelTrainer:
 
         except Exception as e:
             self.db_manager.log_pipeline_execution(
-                pipeline_stage="train_model_v1",
+                pipeline_stage="train_model",
                 execution_date=datetime.now().date(),
                 status="failed",
                 error_message=str(e),

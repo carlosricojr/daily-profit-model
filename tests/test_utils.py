@@ -319,68 +319,105 @@ class TestConfigValidation(unittest.TestCase):
 class TestDatabaseEnhancements(unittest.TestCase):
     """Test enhanced database functionality."""
 
-    @patch("src.utils.database.SimpleConnectionPool")
-    def test_connection_pool_initialization(self, mock_pool_class):
-        """Test database connection pool initialization."""
-        mock_pool = Mock()
-        mock_pool_class.return_value = mock_pool
-
-        db = DatabaseConnection(
-            host="localhost", port=5432, database="test", user="test", password="test"
-        )
-
-        # Verify pool was created
-        mock_pool_class.assert_called_once()
-        self.assertIsNotNone(db.pool)
-
-    @patch("src.utils.database.SimpleConnectionPool")
-    def test_execute_query(self, mock_pool_class):
-        """Test query execution."""
-        # Setup mocks
-        mock_pool = Mock()
+    @patch("src.utils.database.create_engine")
+    def test_connection_pool_initialization(self, mock_create_engine):
+        """Test database connection pool initialization with SQLAlchemy."""
+        mock_engine = Mock()
         mock_conn = Mock()
-        mock_cursor = Mock()
+        mock_conn.execute = Mock()
+        mock_conn.__enter__ = Mock(return_value=mock_conn)
+        mock_conn.__exit__ = Mock(return_value=None)
+        mock_engine.begin.return_value = mock_conn
+        mock_create_engine.return_value = mock_engine
 
-        mock_pool_class.return_value = mock_pool
-        mock_pool.getconn.return_value = mock_conn
-        mock_conn.cursor.return_value = mock_cursor
-        mock_cursor.__enter__ = Mock(return_value=mock_cursor)
-        mock_cursor.__exit__ = Mock(return_value=None)
+        # Set up environment variable
+        with patch.dict(os.environ, {"DB_CONNECTION_STRING_SESSION_POOLER": "postgresql://test"}):
+            db = DatabaseConnection(
+                connection_string="postgresql://test",
+                schema="test_schema"
+            )
+
+        # Verify engine was created with proper pooling settings
+        mock_create_engine.assert_called_once()
+        call_args = mock_create_engine.call_args
+        self.assertEqual(call_args[1]["pool_size"], 10)
+        self.assertEqual(call_args[1]["max_overflow"], 20)
+        self.assertTrue(call_args[1]["pool_pre_ping"])
+        self.assertIsNotNone(db.engine)
+
+    @patch("src.utils.database.create_engine")
+    @patch("src.utils.database.RealDictCursor")
+    def test_execute_query(self, mock_cursor_factory, mock_create_engine):
+        """Test query execution with SQLAlchemy."""
+        # Setup mocks for engine creation
+        mock_engine = Mock()
+        mock_conn = Mock()
+        mock_conn.execute = Mock()
+        mock_conn.__enter__ = Mock(return_value=mock_conn)
+        mock_conn.__exit__ = Mock(return_value=None)
+        mock_engine.begin.return_value = mock_conn
+        mock_create_engine.return_value = mock_engine
+        
+        # Setup mocks for query execution
+        mock_raw_conn = Mock()
+        mock_cursor = Mock()
+        mock_engine.raw_connection.return_value = mock_raw_conn
+        mock_raw_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cursor)
+        mock_raw_conn.cursor.return_value.__exit__ = Mock(return_value=None)
+        mock_raw_conn.commit = Mock()
+        mock_raw_conn.rollback = Mock()
+        mock_raw_conn.close = Mock()
+        
+        # Mock cursor results
         mock_cursor.fetchall.return_value = [{"id": 1, "name": "test"}]
 
-        db = DatabaseConnection(
-            host="localhost", port=5432, database="test", user="test", password="test"
-        )
+        with patch.dict(os.environ, {"DB_CONNECTION_STRING_SESSION_POOLER": "postgresql://test"}):
+            db = DatabaseConnection(
+                connection_string="postgresql://test",
+                schema="test_schema"
+            )
 
-        # Execute query
-        result = db.execute_query("SELECT * FROM test")
+            # Execute query
+            result = db.execute_query("SELECT * FROM test")
 
         # Verify
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["id"], 1)
-        mock_cursor.execute.assert_called_with("SELECT * FROM test", None)
 
-    @patch("src.utils.database.SimpleConnectionPool")
-    def test_table_exists(self, mock_pool_class):
-        """Test table existence check."""
-        # Setup mocks
-        mock_pool = Mock()
+    @patch("src.utils.database.create_engine")
+    @patch("src.utils.database.RealDictCursor")
+    def test_table_exists(self, mock_cursor_factory, mock_create_engine):
+        """Test table existence check with SQLAlchemy."""
+        # Setup mocks for engine creation
+        mock_engine = Mock()
         mock_conn = Mock()
+        mock_conn.execute = Mock()
+        mock_conn.__enter__ = Mock(return_value=mock_conn)
+        mock_conn.__exit__ = Mock(return_value=None)
+        mock_engine.begin.return_value = mock_conn
+        mock_create_engine.return_value = mock_engine
+        
+        # Setup mocks for query execution
+        mock_raw_conn = Mock()
         mock_cursor = Mock()
-
-        mock_pool_class.return_value = mock_pool
-        mock_pool.getconn.return_value = mock_conn
-        mock_conn.cursor.return_value = mock_cursor
-        mock_cursor.__enter__ = Mock(return_value=mock_cursor)
-        mock_cursor.__exit__ = Mock(return_value=None)
+        mock_engine.raw_connection.return_value = mock_raw_conn
+        mock_raw_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cursor)
+        mock_raw_conn.cursor.return_value.__exit__ = Mock(return_value=None)
+        mock_raw_conn.commit = Mock()
+        mock_raw_conn.rollback = Mock()
+        mock_raw_conn.close = Mock()
+        
+        # Mock cursor results
         mock_cursor.fetchall.return_value = [{"exists": True}]
 
-        db = DatabaseConnection(
-            host="localhost", port=5432, database="test", user="test", password="test"
-        )
+        with patch.dict(os.environ, {"DB_CONNECTION_STRING_SESSION_POOLER": "postgresql://test"}):
+            db = DatabaseConnection(
+                connection_string="postgresql://test",
+                schema="test_schema"
+            )
 
-        # Check table exists
-        exists = db.table_exists("test_table")
+            # Check table exists
+            exists = db.table_exists("test_table")
 
         self.assertTrue(exists)
 

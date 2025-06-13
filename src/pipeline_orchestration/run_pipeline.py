@@ -17,7 +17,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.database import get_db_manager, close_db_connections
 from utils.logging_config import setup_logging
-from utils.schema_manager import SchemaManager
 
 logger = logging.getLogger(__name__)
 
@@ -233,57 +232,42 @@ class PipelineOrchestrator:
             else:
                 logger.info("DRY RUN: Would drop and recreate entire schema")
         else:
-            # Use Enhanced Alembic-based schema management
-            try:
-                from utils.enhanced_alembic_schema_manager import create_enhanced_alembic_schema_manager
-                schema_manager = create_enhanced_alembic_schema_manager(self.db_manager)
-                
-                logger.info("Using Enhanced Alembic for production-grade schema management...")
-                result = schema_manager.ensure_schema_compliance(
-                    schema_path=schema_file,
-                    preserve_data=preserve_data,
-                    dry_run=dry_run
-                )
-                
-                if result['migration_needed']:
-                    if result['success']:
-                        logger.info("Schema migration completed successfully with Alembic")
-                        if 'new_revision' in result:
-                            logger.info(f"  - New migration revision: {result['new_revision']}")
-                        if dry_run:
-                            logger.info("DRY RUN MODE - Review pending migrations")
-                    else:
-                        raise RuntimeError(f"Alembic schema migration failed: {result.get('error', 'Unknown error')}")
-                else:
-                    logger.info("Database schema is already compliant. No migration needed.")
+            # With our new simplified setup, we can check if schema exists
+            # and create it if needed, or just log that it's already present
+            logger.info("Checking if database schema exists...")
+            
+            # Check if key tables exist
+            tables_to_check = [
+                "raw_metrics_daily", "raw_metrics_hourly", "raw_metrics_alltime",
+                "raw_trades_closed", "raw_trades_open", "raw_regimes_daily",
+                "stg_accounts_daily_snapshots", "feature_store_account_daily",
+                "model_registry", "model_predictions"
+            ]
+            
+            missing_tables = []
+            for table in tables_to_check:
+                if not self.db_manager.model_db.table_exists(table):
+                    missing_tables.append(table)
+            
+            if missing_tables:
+                logger.warning(f"Missing tables: {missing_tables}")
+                if not dry_run:
+                    logger.info("Creating database schema...")
+                    # Read schema file
+                    with open(schema_file, "r") as f:
+                        schema_sql = f.read()
                     
-            except ImportError as e:
-                logger.warning(f"Alembic not available ({str(e)}), falling back to custom schema manager")
-                # Fallback to custom schema manager
-                from utils.schema_manager import SchemaManager
-                schema_manager = SchemaManager(self.db_manager)
-                
-                logger.info("Analyzing current database state and comparing with desired schema...")
-                result = schema_manager.ensure_schema_compliance(
-                    schema_path=schema_file,
-                    preserve_data=preserve_data,
-                    dry_run=dry_run
-                )
-                
-                if result['migration_needed']:
-                    if result['success']:
-                        logger.info("Schema migration completed successfully")
-                        logger.info(f"  - Objects created: {len(result.get('comparison', {}).get('to_create', {}))}")
-                        logger.info(f"  - Objects modified: {len(result.get('comparison', {}).get('to_modify', {}))}")
-                        logger.info(f"  - Objects dropped: {len(result.get('comparison', {}).get('to_drop', {}))}")
-                        if dry_run:
-                            logger.info("DRY RUN MODE - Review migration script:")
-                            logger.info(f"  Migration file: {result.get('migration_file', 'N/A')}")
-                            logger.info(f"  Rollback file: {result.get('rollback_file', 'N/A')}")
-                    else:
-                        raise RuntimeError(f"Schema migration failed: {result.get('error', 'Unknown error')}")
+                    # Execute schema creation
+                    with self.db_manager.model_db.get_connection() as conn:
+                        with conn.cursor() as cursor:
+                            cursor.execute(schema_sql)
+                            conn.commit()
+                    
+                    logger.info("Database schema created successfully")
                 else:
-                    logger.info("Database schema is already compliant. No changes needed.")
+                    logger.info(f"DRY RUN: Would create {len(missing_tables)} missing tables")
+            else:
+                logger.info("Database schema is already compliant. All tables exist.")
 
     def _run_ingestion(
         self,
@@ -326,6 +310,8 @@ class PipelineOrchestrator:
                     "ingest_trades",
                     [
                         "open",
+                        "--start-date",
+                        str(start_date),
                         "--end-date",
                         str(end_date),
                         "--log-level",
@@ -904,7 +890,8 @@ Examples:
     parser.add_argument(
         "--end-date",
         type=lambda s: datetime.strptime(s, "%Y-%m-%d").date(),
-        help="End date for data processing (YYYY-MM-DD)",
+        default=(datetime.now() - timedelta(days=1)).date(),
+        help="End date for data processing (YYYY-MM-DD, defaults to yesterday)",
     )
     parser.add_argument(
         "--force", action="store_true", help="Force re-run of completed stages"

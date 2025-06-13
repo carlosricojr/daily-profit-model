@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, asdict
 from collections import defaultdict
 import tempfile
 import time
+from functools import wraps
 
 # Database optimization imports
 try:
@@ -45,6 +46,63 @@ except ImportError:
     )
 
 logger = get_logger(__name__)
+
+
+def timed_operation(operation_name: str):
+    """
+    Decorator to time operations and add timing info to logs.
+    
+    Args:
+        operation_name: Name of the operation being timed
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = time.time()
+            try:
+                result = func(*args, **kwargs)
+                elapsed_time = time.time() - start_time
+                logger.info(
+                    f"{operation_name} completed",
+                    extra={"time": elapsed_time, "operation": operation_name}
+                )
+                return result
+            except Exception as e:
+                elapsed_time = time.time() - start_time
+                logger.error(
+                    f"{operation_name} failed",
+                    extra={"time": elapsed_time, "operation": operation_name, "error": str(e)}
+                )
+                raise
+        return wrapper
+    return decorator
+
+
+class TimedBlock:
+    """Context manager for timing blocks of code."""
+    
+    def __init__(self, operation_name: str, logger=None):
+        self.operation_name = operation_name
+        self.logger = logger or get_logger(__name__)
+        self.start_time = None
+        
+    def __enter__(self):
+        self.start_time = time.time()
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        elapsed_time = time.time() - self.start_time
+        if exc_type is None:
+            self.logger.info(
+                f"{self.operation_name} completed",
+                extra={"time": elapsed_time, "operation": self.operation_name}
+            )
+        else:
+            self.logger.error(
+                f"{self.operation_name} failed",
+                extra={"time": elapsed_time, "operation": self.operation_name, "error": str(exc_val)}
+            )
+        return False  # Don't suppress exceptions
 
 
 @dataclass
@@ -450,7 +508,7 @@ class BaseIngester:
             logger.error(
                 "Failed to log pipeline execution",
                 error=str(e),
-                pipeline_stage=f"ingest_{self.ingestion_type}",
+                pipeline_name=f"ingest_{self.ingestion_type}",
                 exc_info=True,
             )
 

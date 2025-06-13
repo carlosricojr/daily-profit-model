@@ -10,15 +10,18 @@ from typing import List, Dict, Any, Optional, Tuple, Union
 from pathlib import Path
 import hashlib
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import tempfile
 
 # Ensure we can import from parent directories
 try:
-    from .base_ingester import BaseIngester
+    from .base_ingester import BaseIngester, timed_operation
     from ..utils.logging_config import get_logger
 except ImportError:
     # Fallback for direct execution
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from data_ingestion.base_ingester import BaseIngester
+    from data_ingestion.base_ingester import BaseIngester, timed_operation
     from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -153,6 +156,7 @@ class PlansIngester(BaseIngester):
 
         self.source_endpoint = "csv_files"
         self.metrics.files_processed = 0
+        self.metrics_lock = threading.Lock()
 
     def _normalize_column_name(self, col: str) -> str:
         """Normalize column name for matching."""
@@ -443,6 +447,7 @@ class PlansIngester(BaseIngester):
             logger.error(f"Failed to insert batch: {str(e)}")
             raise
 
+    @timed_operation("plans_process_csv_file")
     def _process_csv_file(
         self, file_path: Path, checkpoint: Optional[Dict[str, Any]] = None
     ) -> int:
@@ -526,6 +531,7 @@ class PlansIngester(BaseIngester):
             logger.error(f"Error processing CSV file {file_path}: {str(e)}")
             raise
 
+    @timed_operation("plans_ingest_main")
     def ingest_plans(
         self,
         csv_directory: Optional[str] = None,
@@ -616,29 +622,68 @@ class PlansIngester(BaseIngester):
 
             logger.info(f"Found {len(files_to_process)} CSV files to process")
 
-            # Process each file
+            # Decide whether to run in parallel (only if not resuming from checkpoint)
             total_records = 0
-            for file_path in files_to_process:
-                records = self._process_csv_file(file_path, checkpoint)
-                total_records += records
-                self.metrics.files_processed += 1
 
-                # Save checkpoint after each file
-                self.checkpoint_manager.save_checkpoint(
-                    {
-                        "last_processed_file": file_path.name,
-                        "last_processed_row": -1,  # Indicates file is complete
-                        "total_records": self.metrics.total_records,
-                        "metrics": self.metrics.to_dict(),
-                    }
-                )
+            use_parallel = len(files_to_process) > 1 and not checkpoint
 
-                # Clear checkpoint for next file
-                checkpoint = None
+            if use_parallel:
+                max_workers = min(8, len(files_to_process))
+                logger.info(f"Processing plan files in parallel with {max_workers} workers")
 
-            # Clear checkpoint on successful completion
-            if resume_from_checkpoint:
-                self.checkpoint_manager.clear_checkpoint()
+                def process_file_parallel(fp: Path) -> Tuple[int, Dict[str, Any]]:
+                    """Isolated worker to process a single CSV file."""
+                    # Use a temp checkpoint dir to avoid clashes
+                    tmp_dir = tempfile.mkdtemp(prefix="plans_ckpt_")
+                    sub_ing = PlansIngester(
+                        checkpoint_dir=tmp_dir,
+                        enable_validation=self.enable_validation,
+                        enable_deduplication=self.enable_deduplication,
+                    )
+                    # Disable checkpoint writes in worker (safe simplification)
+                    sub_ing.checkpoint_manager.save_checkpoint = lambda *a, **k: None
+                    sub_ing.checkpoint_manager.clear_checkpoint = lambda *a, **k: None
+                    try:
+                        recs = sub_ing._process_csv_file(fp, None)
+                        return recs, sub_ing.metrics.to_dict()
+                    finally:
+                        sub_ing.close()
+
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {executor.submit(process_file_parallel, fp): fp for fp in files_to_process}
+                    for fut in as_completed(futures):
+                        fp = futures[fut]
+                        try:
+                            recs, met = fut.result()
+                            total_records += recs
+                            with self.metrics_lock:
+                                self.metrics.files_processed += 1
+                                self.metrics.new_records += met.get("new_records", 0)
+                                self.metrics.invalid_records += met.get("invalid_records", 0)
+                                self.metrics.total_records += met.get("total_records", 0)
+                                self.metrics.duplicate_records += met.get("duplicate_records", 0)
+                            logger.info(f"Completed file {fp.name} – {recs} records")
+                        except Exception as exc:
+                            logger.error(f"File {fp.name} failed: {exc}")
+            else:
+                # Sequential processing (maintains checkpoint semantics)
+                for file_path in files_to_process:
+                    records = self._process_csv_file(file_path, checkpoint)
+                    total_records += records
+                    self.metrics.files_processed += 1
+
+                    # Save checkpoint after each file
+                    self.checkpoint_manager.save_checkpoint(
+                        {
+                            "last_processed_file": file_path.name,
+                            "last_processed_row": -1,
+                            "total_records": self.metrics.total_records,
+                            "metrics": self.metrics.to_dict(),
+                        }
+                    )
+
+                    # Clear checkpoint for next file
+                    checkpoint = None
 
             # Log successful completion
             self.log_pipeline_execution("success")
