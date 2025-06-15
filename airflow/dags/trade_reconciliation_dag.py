@@ -35,27 +35,90 @@ DEFAULT_ARGS = {
 
 def maintain_trade_recon_table(**_):
     """Maintenance wrapper executed by Airflow."""
-    # Local import to reduce DAG-bag parse time
-    from src.data_quality.maintain_trade_recon import refresh_all_account_ids
-    from src.data_quality.trade_reconciliation import fix_all_null_account_ids
+    import subprocess
+    from pathlib import Path
+    
+    # Get project root
+    project_root = Path(__file__).parent.parent.parent
+    
+    # Run maintenance script using uv
+    maintenance_script = """
+from src.data_quality.maintain_trade_recon import refresh_all_account_ids
+from src.data_quality.trade_reconciliation import fix_all_null_account_ids
 
-    fix_results = fix_all_null_account_ids()
-    print(f"[trade_recon] Null-account_id fix results → {fix_results}")
+fix_results = fix_all_null_account_ids()
+print(f"[trade_recon] Null-account_id fix results → {fix_results}")
 
-    refresh_all_account_ids()
+refresh_all_account_ids()
+"""
+    
+    # Write script to temp file
+    script_file = project_root / "temp_maintain_trade_recon.py"
+    with open(script_file, 'w') as f:
+        f.write(maintenance_script)
+    
+    try:
+        # Execute using uv run
+        result = subprocess.run(
+            ["uv", "run", "--env-file", ".env", "python", str(script_file)],
+            cwd=project_root,
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode != 0:
+            raise Exception(f"Maintenance failed: {result.stderr}")
+        
+        print(result.stdout)
+    finally:
+        # Clean up temp file
+        if script_file.exists():
+            script_file.unlink()
 
 
 def run_reconciliation(retry_failed: bool = False, **_):
     """Run the main reconciliation job."""
-    from src.data_quality.trade_reconciliation import reconcile_all_mismatched_accounts
+    import subprocess
+    from pathlib import Path
+    
+    # Get project root
+    project_root = Path(__file__).parent.parent.parent
+    
+    # Run reconciliation script using uv
+    reconciliation_script = f"""
+from src.data_quality.trade_reconciliation import reconcile_all_mismatched_accounts
 
-    summary = reconcile_all_mismatched_accounts(retry_failed=retry_failed)
-    print(f"[trade_recon] Reconciliation summary → {summary}")
+summary = reconcile_all_mismatched_accounts(retry_failed={retry_failed})
+print(f"[trade_recon] Reconciliation summary → {{summary}}")
 
-    if summary["failed"] > summary["total_processed"] * 0.1:
-        raise RuntimeError(
-            f"High failure rate: {summary['failed']}/{summary['total_processed']}"
+if summary["failed"] > summary["total_processed"] * 0.1:
+    raise RuntimeError(
+        f"High failure rate: {{summary['failed']}}/{{summary['total_processed']}}"
+    )
+"""
+    
+    # Write script to temp file
+    script_file = project_root / "temp_run_reconciliation.py"
+    with open(script_file, 'w') as f:
+        f.write(reconciliation_script)
+    
+    try:
+        # Execute using uv run
+        result = subprocess.run(
+            ["uv", "run", "--env-file", ".env", "python", str(script_file)],
+            cwd=project_root,
+            capture_output=True,
+            text=True
         )
+        
+        if result.returncode != 0:
+            raise Exception(f"Reconciliation failed: {result.stderr}")
+        
+        print(result.stdout)
+    finally:
+        # Clean up temp file
+        if script_file.exists():
+            script_file.unlink()
 
 # ---------------------------------------------------------------------------
 # Primary nightly DAG (skips previously failed accounts)

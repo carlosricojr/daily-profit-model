@@ -7,10 +7,22 @@ from datetime import datetime, timedelta
 from typing import Dict, Any
 import logging
 import os
+import sys
+from pathlib import Path
+from functools import partial
+
+# Add project root to Python path for imports
+project_root = Path(__file__).parent.parent.parent
+sys.path.append(str(project_root / "src"))
+
+# Set environment variables from parent .env if needed
+import dotenv
+parent_env_path = project_root / ".env"
+if parent_env_path.exists():
+    dotenv.load_dotenv(parent_env_path)
 
 from airflow import DAG
 from airflow.providers.standard.operators.python import PythonOperator
-from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.models import Variable
 from airflow.providers.postgres.hooks.postgres import PostgresHook
@@ -31,7 +43,6 @@ DEFAULT_ARGS = {
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
     "email": ["carlos@eastontech.net"],
-    # SLA removed in Airflow 3.0 - will be replaced in 3.1+
     "catchup": False,
 }
 
@@ -54,455 +65,46 @@ def get_pipeline_config():
     }
 
 
-class PipelineOperator(PythonOperator):
-    """Custom operator for pipeline stages with enhanced monitoring."""
-
-    def __init__(
-        self,
-        stage_name: str,
-        module_path: str,
-        stage_args: list = None,
-        *args,
-        **kwargs,
-    ):
-        self.stage_name = stage_name
-        self.module_path = module_path
-        self.stage_args = stage_args or []
-        # Set python_callable to our execute method
-        kwargs['python_callable'] = self.execute
-        super().__init__(*args, **kwargs)
-
-    def execute(self, context: Dict[str, Any]) -> Any:
-        """Execute pipeline stage with monitoring."""
-        import subprocess
-        import sys
-        from pathlib import Path
-
-        # More explicit context access for Airflow 3.0
-        execution_date = context.get("execution_date") or context.get("logical_date")
-        dag_run = context.get("dag_run")
-        
-        if not execution_date or not dag_run:
-            raise ValueError("Missing required context variables: execution_date or dag_run")
-            
-        dag_run_id = dag_run.run_id
-
-        logger.info(f"Starting stage {self.stage_name} for execution {dag_run_id}")
-
-        # Prepare command
-        src_dir = Path(__file__).parent.parent
-        cmd = [sys.executable, "-m", self.module_path] + self.stage_args
-
-        # Add execution context to arguments
-        cmd.extend(
-            [
-                "--execution-date",
-                execution_date.strftime("%Y-%m-%d"),
-                "--dag-run-id",
-                dag_run_id,
-                "--log-level",
-                "INFO",
-            ]
-        )
-
-        try:
-            # Execute with timeout
-            result = subprocess.run(
-                cmd,
-                cwd=src_dir,
-                capture_output=True,
-                text=True,
-                timeout=3600,  # 1 hour timeout
-            )
-
-            if result.returncode == 0:
-                logger.info(f"Stage {self.stage_name} completed successfully")
-                return {"status": "success", "output": result.stdout}
-            else:
-                logger.error(f"Stage {self.stage_name} failed: {result.stderr}")
-                raise Exception(f"Stage failed: {result.stderr}")
-
-        except subprocess.TimeoutExpired:
-            logger.error(f"Stage {self.stage_name} timed out")
-            raise Exception("Stage execution timed out")
-        except Exception as e:
-            logger.error(f"Stage {self.stage_name} failed with exception: {str(e)}")
-            raise
-
-
-def check_data_freshness(**context) -> bool:
-    """Check if source data is fresh enough for processing."""
-    hook = PostgresHook(postgres_conn_id="postgres_model_db")
-
-    # Check when data was last updated
-    query = """
-    SELECT MAX(ingestion_timestamp) as last_update
-    FROM prop_trading_model.raw_metrics_daily
-    WHERE DATE(ingestion_timestamp) >= CURRENT_DATE - INTERVAL '2 days'
-    """
-
-    result = hook.get_first(query)
-    if not result or not result[0]:
-        logger.warning("No recent data found in raw_metrics_daily")
-        return False
-
-    last_update = result[0]
-    hours_old = (datetime.now() - last_update).total_seconds() / 3600
-
-    if hours_old > 25:  # Data should be less than 25 hours old
-        logger.warning(f"Data is {hours_old:.1f} hours old, may be stale")
-        return False
-
-    logger.info(f"Data freshness check passed - last update {hours_old:.1f} hours ago")
-    return True
-
-
-def check_model_availability(**context) -> bool:
-    """Check if a trained model is available for predictions."""
-    try:
-        hook = PostgresHook(postgres_conn_id="postgres_model_db")
-
-        query = """
-        SELECT model_version, model_path, is_active, created_at
-        FROM prop_trading_model.model_registry
-        WHERE is_active = true
-        ORDER BY created_at DESC
-        LIMIT 1
-        """
-
-        result = hook.get_first(query)
-        if not result:
-            logger.warning("No active model found in registry")
-            return False
-
-        model_version, model_path, is_active, created_at = result
-        
-        # Check if model is too old (more than 30 days)
-        if (datetime.now() - created_at).days > 30:
-            logger.warning(f"Active model is too old (created {created_at})")
-            return False
-            
-        # Verify model file exists
-        if not os.path.exists(model_path):
-            logger.error(f"Model file not found at path: {model_path}")
-            return False
-
-        logger.info(f"Active model found: {model_version} at {model_path} (created {created_at})")
-        return is_active
-        
-    except Exception as e:
-        logger.error(f"Error checking model availability: {str(e)}")
-        return False
-
-
-def send_pipeline_alert(
-    context: Dict[str, Any], message: str, alert_type: str = "error"
-):
-    """Send pipeline alerts via email."""
-    # More explicit context access for Airflow 3.0
-    task_instance = context.get("task_instance")
-    dag = context.get("dag")
+def run_pipeline_stage(stage_name: str, module_path: str, **kwargs) -> Any:
+    """Execute pipeline stage with direct Python imports."""
+    # Get context from kwargs
+    context = kwargs
+    execution_date = context.get("execution_date") or context.get("logical_date")
     dag_run = context.get("dag_run")
-    execution_date = context.get("execution_date") or context.get("logical_date")
     
-    if not all([task_instance, dag, dag_run]):
-        logger.error("Missing required context variables for alert")
-        return
+    if not execution_date or not dag_run:
+        raise ValueError("Missing required context variables: execution_date or dag_run")
     
-    subject = f"[{alert_type.upper()}] Daily Profit Model Pipeline - {task_instance.task_id}"
-
-    html_content = f"""
-    <h3>Pipeline Alert</h3>
-    <p><strong>DAG:</strong> {dag.dag_id}</p>
-    <p><strong>Task:</strong> {task_instance.task_id}</p>
-    <p><strong>Execution Date:</strong> {execution_date}</p>
-    <p><strong>Run ID:</strong> {dag_run.run_id}</p>
-    <p><strong>Alert Type:</strong> {alert_type}</p>
+    dag_run_id = dag_run.run_id
+    logger.info(f"Starting stage {stage_name} for execution {dag_run_id}")
     
-    <h4>Message:</h4>
-    <p>{message}</p>
-    
-    <h4>Context:</h4>
-    <p>Log URL: {task_instance.log_url}</p>
-    """
-
-    config = get_pipeline_config()
-    send_email(
-        to=[config["alert_email"]], subject=subject, html_content=html_content
-    )
-
-
-def validate_data_quality_with_great_expectations(**context) -> bool:
-    """
-    Perform comprehensive data quality checks using Great Expectations.
-    Maintains backward compatibility with existing threshold-based checks.
-    """
-    config = get_pipeline_config()
-    if not config["enable_data_quality_checks"]:
-        logger.info("Data quality checks disabled")
-        return True
-
-    # More explicit context access for Airflow 3.0
-    execution_date = context.get("execution_date") or context.get("logical_date")
-    
-    if not execution_date:
-        logger.error("Missing execution_date in context")
-        return False
-
     try:
-        # Import Great Expectations validator
-        import sys
-        from pathlib import Path
-        src_dir = Path(__file__).parent.parent
-        sys.path.append(str(src_dir))
+        # Import the module dynamically
+        parts = module_path.split('.')
+        module = __import__(module_path, fromlist=[parts[-1]])
         
-        from preprocessing.great_expectations_config import GreatExpectationsValidator
-        from utils.database import get_db_manager
-        
-        # Initialize Great Expectations validator
-        db_manager = get_db_manager()
-        ge_validator = GreatExpectationsValidator(db_manager)
-        
-        # Run comprehensive ML pipeline validation
-        validation_date = execution_date.date()
-        results = ge_validator.validate_ml_pipeline_data_quality(validation_date)
-        
-        # Check overall pipeline health
-        pipeline_summary = results.get("pipeline_summary", {})
-        overall_success = pipeline_summary.get("overall_success", False)
-        success_rate = pipeline_summary.get("success_rate", 0)
-        
-        # Log detailed results
-        logger.info(f"Great Expectations validation completed for {validation_date}")
-        logger.info(f"Overall success: {overall_success}")
-        logger.info(f"Success rate: {success_rate:.2%}")
-        logger.info(f"Total expectations: {pipeline_summary.get('total_expectations', 0)}")
-        logger.info(f"Successful expectations: {pipeline_summary.get('successful_expectations', 0)}")
-        
-        # Check individual table results and maintain backward compatibility
-        failed_checks = []
-        warning_checks = []
-        
-        # Core data completeness checks (maintaining existing thresholds)
-        hook = PostgresHook(postgres_conn_id="postgres_model_db")
-        
-        # Check raw_metrics_alltime data completeness (replaces old raw_accounts_data check)
-        alltime_query = """
-            SELECT COUNT(*) as count
-            FROM prop_trading_model.raw_metrics_alltime
-            WHERE DATE(ingestion_timestamp) = %s
-        """
-        alltime_result = hook.get_first(alltime_query, parameters=[validation_date])
-        alltime_count = alltime_result[0] if alltime_result else 0
-        
-        if alltime_count < 100:  # Maintain existing threshold
-            failed_checks.append(f"alltime_metrics_completeness: {alltime_count} < 100")
-            logger.error(f"Alltime metrics data completeness failed: {alltime_count} records")
+        # Get the main function from the module
+        if hasattr(module, 'main'):
+            # Call the main function with appropriate arguments
+            args_dict = {
+                'execution_date': execution_date,
+                'dag_run_id': dag_run_id,
+                'log_level': 'INFO'
+            }
+            
+            # Add any stage-specific arguments
+            if 'stage_args' in kwargs:
+                args_dict.update(kwargs['stage_args'])
+            
+            result = module.main(**args_dict)
+            logger.info(f"Stage {stage_name} completed successfully")
+            return {"status": "success", "result": result}
         else:
-            logger.info(f"Alltime metrics data completeness passed: {alltime_count} records")
-        
-        # Check daily metrics completeness
-        daily_query = """
-            SELECT COUNT(DISTINCT login) as unique_logins
-            FROM prop_trading_model.raw_metrics_daily
-            WHERE date = %s
-        """
-        daily_result = hook.get_first(daily_query, parameters=[validation_date - timedelta(days=1)])
-        daily_count = daily_result[0] if daily_result else 0
-        
-        if daily_count < 50:  # Maintain existing threshold
-            failed_checks.append(f"daily_metrics_completeness: {daily_count} < 50")
-            logger.error(f"Daily metrics data completeness failed: {daily_count} unique logins")
-        else:
-            logger.info(f"Daily metrics data completeness passed: {daily_count} unique logins")
-        
-        # Check data consistency between alltime and daily metrics
-        consistency_query = """
-            SELECT COUNT(*) as count
-            FROM prop_trading_model.raw_metrics_alltime a
-            JOIN prop_trading_model.raw_metrics_daily d
-            ON a.login = d.login
-            WHERE DATE(a.ingestion_timestamp) = %s
-            AND d.date = %s
-        """
-        consistency_result = hook.get_first(
-            consistency_query, 
-            parameters=[validation_date, validation_date - timedelta(days=1)]
-        )
-        consistency_count = consistency_result[0] if consistency_result else 0
-        
-        if consistency_count < 30:  # Maintain existing threshold
-            failed_checks.append(f"data_consistency: {consistency_count} < 30")
-            logger.error(f"Data consistency check failed: {consistency_count} matching records")
-        else:
-            logger.info(f"Data consistency check passed: {consistency_count} matching records")
-        
-        # Process Great Expectations results for each table
-        for table_name, table_result in results.items():
-            if table_name == "pipeline_summary":
-                continue
-                
-            if isinstance(table_result, dict):
-                table_success = table_result.get("success", False)
-                failed_expectations = table_result.get("failed_expectations", 0)
-                total_expectations = table_result.get("total_expectations", 0)
-                
-                if not table_success and failed_expectations > 0:
-                    warning_checks.append(
-                        f"{table_name}: {failed_expectations}/{total_expectations} expectations failed"
-                    )
-                    logger.warning(f"Great Expectations validation failed for {table_name}: "
-                                 f"{failed_expectations} failed expectations")
-                elif table_result.get("error"):
-                    warning_checks.append(f"{table_name}: {table_result['error']}")
-                    logger.warning(f"Great Expectations validation error for {table_name}: "
-                                 f"{table_result['error']}")
-                else:
-                    logger.info(f"Great Expectations validation passed for {table_name}: "
-                              f"{total_expectations} expectations")
-        
-        # Determine overall result
-        has_critical_failures = len(failed_checks) > 0
-        has_warnings = len(warning_checks) > 0
-        
-        # Send alerts if needed
-        if has_critical_failures:
-            message = "Critical data quality checks failed:\n" + "\n".join(failed_checks)
-            if has_warnings:
-                message += "\n\nWarnings:\n" + "\n".join(warning_checks)
-            send_pipeline_alert(context, message, "error")
-            return False
-        elif has_warnings:
-            message = "Data quality warnings detected:\n" + "\n".join(warning_checks)
-            send_pipeline_alert(context, message, "warning")
-            # Continue pipeline execution for warnings
-        
-        # Log success
-        if not has_critical_failures and not has_warnings:
-            logger.info("All data quality checks passed successfully")
-        
-        return True
-        
+            raise AttributeError(f"Module {module_path} does not have a main() function")
+            
     except Exception as e:
-        logger.error(f"Great Expectations validation failed with exception: {str(e)}")
-        # Fallback to basic validation if Great Expectations fails
-        logger.warning("Falling back to basic data quality checks")
-        return validate_data_quality_basic(context)
-
-
-def validate_data_quality_basic(**context) -> bool:
-    """
-    Fallback basic data quality validation.
-    Used when Great Expectations is disabled or fails.
-    """
-    config = get_pipeline_config()
-    if not config["enable_data_quality_checks"]:
-        logger.info("Data quality checks disabled")
-        return True
-
-    hook = PostgresHook(postgres_conn_id="postgres_model_db")
-    execution_date = context.get("execution_date") or context.get("logical_date")
-    
-    if not execution_date:
-        logger.error("Missing execution_date in context")
-        return False
-
-    # Updated checks to use correct table names from schema
-    checks = [
-        {
-            "name": "alltime_metrics_completeness",
-            "query": """
-                SELECT COUNT(*) as count
-                FROM prop_trading_model.raw_metrics_alltime
-                WHERE DATE(ingestion_timestamp) = %s
-            """,
-            "min_threshold": 100,
-            "params": [execution_date.date()],
-        },
-        {
-            "name": "daily_metrics_completeness",
-            "query": """
-                SELECT COUNT(DISTINCT login) as unique_logins
-                FROM prop_trading_model.raw_metrics_daily
-                WHERE date = %s
-            """,
-            "min_threshold": 50,
-            "params": [execution_date.date() - timedelta(days=1)],
-        },
-        {
-            "name": "data_consistency",
-            "query": """
-                SELECT COUNT(*) as count
-                FROM prop_trading_model.raw_metrics_alltime a
-                JOIN prop_trading_model.raw_metrics_daily d
-                ON a.login = d.login
-                WHERE DATE(a.ingestion_timestamp) = %s
-                AND d.date = %s
-            """,
-            "min_threshold": 30,
-            "params": [
-                execution_date.date(),
-                execution_date.date() - timedelta(days=1),
-            ],
-        },
-    ]
-
-    failed_checks = []
-
-    for check in checks:
-        try:
-            result = hook.get_first(check["query"], parameters=check["params"])
-            value = result[0] if result else 0
-
-            if value < check["min_threshold"]:
-                failed_checks.append(
-                    f"{check['name']}: {value} < {check['min_threshold']}"
-                )
-                logger.error(f"Data quality check failed: {check['name']} = {value}")
-            else:
-                logger.info(f"Data quality check passed: {check['name']} = {value}")
-
-        except Exception as e:
-            failed_checks.append(f"{check['name']}: Error - {str(e)}")
-            logger.error(f"Data quality check error: {check['name']} - {str(e)}")
-
-    if failed_checks:
-        message = "Data quality checks failed:\n" + "\n".join(failed_checks)
-        send_pipeline_alert(context, message, "warning")
-        return False
-
-    return True
-
-
-def cleanup_old_data(**context) -> None:
-    """Clean up old data to prevent database bloat."""
-    hook = PostgresHook(postgres_conn_id="postgres_model_db")
-
-    cleanup_queries = [
-        # Clean up old pipeline execution logs (keep 30 days)
-        """
-        DELETE FROM prop_trading_model.pipeline_execution_log
-        WHERE execution_date < CURRENT_DATE - INTERVAL '30 days'
-        """,
-        # Clean up old raw data (keep 90 days) - updated table name
-        """
-        DELETE FROM prop_trading_model.raw_metrics_daily
-        WHERE date < CURRENT_DATE - INTERVAL '90 days'
-        """,
-        # Clean up old predictions (keep 180 days)
-        """
-        DELETE FROM prop_trading_model.model_predictions
-        WHERE prediction_date < CURRENT_DATE - INTERVAL '180 days'
-        """,
-    ]
-
-    for query in cleanup_queries:
-        try:
-            hook.run(query)
-            logger.info("Cleanup query executed successfully")
-        except Exception as e:
-            logger.error(f"Cleanup query failed: {str(e)}")
-
+        logger.error(f"Stage {stage_name} failed with exception: {str(e)}")
+        raise
 
 # Create the DAG
 dag = DAG(
@@ -515,12 +117,58 @@ dag = DAG(
     ),
     catchup=False,
     max_active_runs=1,
-    tags=["machine_learning", "trading", "daily"],
+    tags=["machine_learning", "daily"],
 )
 
 # Start and end operators
 start_pipeline = EmptyOperator(
     task_id="start_pipeline",
+    dag=dag,
+)
+
+testing = PythonOperator(
+    task_id="testing",
+    python_callable=partial(run_pipeline_stage, "testing", "pipeline_orchestration.run_pipeline"),
+    dag=dag,
+    retries=1,
+)
+
+# Data ingestion with parallel sub-tasks
+ingestion = PythonOperator(
+    task_id="ingestion",
+    python_callable=partial(run_pipeline_stage, "ingestion", "pipeline_orchestration.run_pipeline"),
+    dag=dag,
+    retries=1,
+)
+
+preprocessing = PythonOperator(
+    task_id="preprocessing",
+    python_callable=partial(run_pipeline_stage, "preprocessing", "pipeline_orchestration.run_pipeline"),
+    dag=dag,
+)
+
+validation = PythonOperator(
+    task_id="validation",
+    python_callable=partial(run_pipeline_stage, "validation", "pipeline_orchestration.run_pipeline"),
+    dag=dag,
+)
+
+feature_engineering = PythonOperator(
+    task_id="feature_engineering",
+    python_callable=partial(run_pipeline_stage, "feature_engineering", "pipeline_orchestration.run_pipeline"),
+    dag=dag,
+)
+
+training = PythonOperator(
+    task_id="training",
+    python_callable=partial(run_pipeline_stage, "training", "pipeline_orchestration.run_pipeline"),
+    dag=dag,
+)
+
+# Model availability check for predictions
+prediction = PythonOperator(
+    task_id="prediction",
+    python_callable=partial(run_pipeline_stage, "prediction", "pipeline_orchestration.run_pipeline"),
     dag=dag,
 )
 
@@ -530,349 +178,5 @@ end_pipeline = EmptyOperator(
     trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
 )
 
-# Pre-flight checks
-health_check = PythonOperator(
-    task_id="health_check",
-    python_callable=lambda **context: __import__(
-        "pipeline_orchestration.health_checks", fromlist=["run_health_check"]
-    ).run_health_check(verbose=True, include_trends=False),
-    dag=dag,
-    retries=1,
-)
-
-data_freshness_check = PythonOperator(
-    task_id="data_freshness_check",
-    python_callable=check_data_freshness,
-    dag=dag,
-)
-
-# Schema creation (idempotent)
-def ensure_schema(**context):
-    """Ensure database schema exists."""
-    import sys
-    from pathlib import Path
-    
-    # Add src directory to path
-    src_dir = Path(__file__).parent.parent / "src"
-    sys.path.append(str(src_dir))
-    
-    from utils.database import get_db_manager
-    
-    # Get database manager
-    db_manager = get_db_manager()
-    
-    # Schema file path
-    schema_file = src_dir / "db_schema" / "schema.sql"
-    
-    if not schema_file.exists():
-        raise FileNotFoundError(f"Schema file not found: {schema_file}")
-    
-    # Check if key tables exist
-    tables_to_check = [
-        "raw_metrics_daily", "raw_metrics_hourly", "raw_metrics_alltime",
-        "raw_trades_closed", "raw_trades_open", "raw_regimes_daily",
-        "stg_accounts_daily_snapshots", "feature_store_account_daily",
-        "model_registry", "model_predictions"
-    ]
-    
-    missing_tables = []
-    for table in tables_to_check:
-        if not db_manager.model_db.table_exists(table):
-            missing_tables.append(table)
-    
-    if missing_tables:
-        logger.warning(f"Missing tables: {missing_tables}")
-        logger.info("Creating database schema...")
-        
-        # Read schema file
-        with open(schema_file, "r") as f:
-            schema_sql = f.read()
-        
-        # Execute schema creation
-        with db_manager.model_db.get_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(schema_sql)
-                conn.commit()
-        
-        logger.info("Database schema created successfully")
-    else:
-        logger.info("Database schema is already compliant. All tables exist.")
-
-create_schema = PythonOperator(
-    task_id="create_schema",
-    python_callable=ensure_schema,
-    dag=dag,
-)
-
-# Data ingestion with parallel sub-tasks
-ingestion_start = EmptyOperator(
-    task_id="ingestion_start",
-    dag=dag,
-)
-
-ingest_plans = PipelineOperator(
-    task_id="ingest_plans",
-    stage_name="ingest_plans",
-    module_path="data_ingestion.ingest_plans",
-    stage_args=["--log-level", "INFO"],
-    dag=dag,
-    pool="ingestion_pool",
-)
-
-ingest_regimes = PipelineOperator(
-    task_id="ingest_regimes",
-    stage_name="ingest_regimes",
-    module_path="data_ingestion.ingest_regimes",
-    stage_args=[
-        "--start-date",
-        '{{ (execution_date - macros.timedelta(days=7)).strftime("%Y-%m-%d") }}',
-        "--end-date",
-        '{{ execution_date.strftime("%Y-%m-%d") }}',
-        "--log-level",
-        "INFO",
-    ],
-    dag=dag,
-    pool="ingestion_pool",
-)
-
-ingest_metrics_alltime = PipelineOperator(
-    task_id="ingest_metrics_alltime",
-    stage_name="ingest_metrics_alltime",
-    module_path="data_ingestion.ingest_metrics",
-    stage_args=["alltime", "--log-level", "INFO"],
-    dag=dag,
-    pool="ingestion_pool",
-)
-
-ingest_metrics_daily = PipelineOperator(
-    task_id="ingest_metrics_daily",
-    stage_name="ingest_metrics_daily",
-    module_path="data_ingestion.ingest_metrics",
-    stage_args=[
-        "daily",
-        "--start-date",
-        '{{ (execution_date - macros.timedelta(days=2)).strftime("%Y-%m-%d") }}',
-        "--end-date",
-        '{{ execution_date.strftime("%Y-%m-%d") }}',
-        "--log-level",
-        "INFO",
-    ],
-    dag=dag,
-    pool="ingestion_pool",
-)
-
-ingest_metrics_hourly = PipelineOperator(
-    task_id="ingest_metrics_hourly",
-    stage_name="ingest_metrics_hourly",
-    module_path="data_ingestion.ingest_metrics",
-    stage_args=[
-        "hourly",
-        "--start-date",
-        '{{ (execution_date - macros.timedelta(days=1)).strftime("%Y-%m-%d") }}',
-        "--end-date",
-        '{{ execution_date.strftime("%Y-%m-%d") }}',
-        "--log-level", "INFO"],
-    dag=dag,
-    pool="ingestion_pool",
-)
-
-ingest_trades_open = PipelineOperator(
-    task_id="ingest_trades_open",
-    stage_name="ingest_trades_open",
-    module_path="data_ingestion.ingest_trades",
-    stage_args=[
-        "open",
-        "--end-date",
-        '{{ execution_date.strftime("%Y-%m-%d") }}',
-        "--log-level",
-        "INFO",
-    ],
-    dag=dag,
-    pool="ingestion_pool",
-)
-
-ingest_trades_closed = PipelineOperator(
-    task_id="ingest_trades_closed",
-    stage_name="ingest_trades_closed",
-    module_path="data_ingestion.ingest_trades",
-    stage_args=[
-        "closed",
-        "--start-date",
-        '{{ (execution_date - macros.timedelta(days=2)).strftime("%Y-%m-%d") }}',
-        "--end-date",
-        '{{ execution_date.strftime("%Y-%m-%d") }}',
-        "--batch-days",
-        "1",
-        "--log-level",
-        "INFO",
-    ],
-    dag=dag,
-    pool="ingestion_pool",
-)
-
-ingestion_complete = EmptyOperator(
-    task_id="ingestion_complete",
-    dag=dag,
-    trigger_rule=TriggerRule.ALL_SUCCESS,
-)
-
-# Enhanced data quality validation with Great Expectations
-data_quality_check = PythonOperator(
-    task_id="data_quality_check",
-    python_callable=validate_data_quality_with_great_expectations,
-    dag=dag,
-)
-
-# Preprocessing
-preprocessing = PipelineOperator(
-    task_id="preprocessing",
-    stage_name="preprocessing",
-    module_path="preprocessing.create_staging_snapshots",
-    stage_args=[
-        "--start-date",
-        '{{ (execution_date - macros.timedelta(days=2)).strftime("%Y-%m-%d") }}',
-        "--end-date",
-        '{{ execution_date.strftime("%Y-%m-%d") }}',
-        "--clean-data",
-        "--log-level",
-        "INFO",
-    ],
-    dag=dag,
-)
-
-# Feature engineering
-feature_engineering = PipelineOperator(
-    task_id="feature_engineering",
-    stage_name="feature_engineering",
-    module_path="feature_engineering.feature_engineering",
-    stage_args=[
-        "--start-date",
-        '{{ (execution_date - macros.timedelta(days=2)).strftime("%Y-%m-%d") }}',
-        "--end-date",
-        '{{ execution_date.strftime("%Y-%m-%d") }}',
-        "--log-level",
-        "INFO",
-    ],
-    dag=dag,
-)
-
-build_training_data = PipelineOperator(
-    task_id="build_training_data",
-    stage_name="build_training_data",
-    module_path="feature_engineering.build_training_data",
-    stage_args=[
-        "--start-date",
-        '{{ (execution_date - macros.timedelta(days=2)).strftime("%Y-%m-%d") }}',
-        "--end-date",
-        '{{ (execution_date - macros.timedelta(days=1)).strftime("%Y-%m-%d") }}',
-        "--validate",
-        "--log-level",
-        "INFO",
-    ],
-    dag=dag,
-)
-
-# Model training (weekly)
-model_training = PipelineOperator(
-    task_id="model_training",
-    stage_name="model_training",
-    module_path="modeling.train_model",
-    stage_args=["--tune-hyperparameters", "--n-trials", "50", "--log-level", "INFO"],
-    dag=dag,
-    # Only run on Sundays
-    execution_timeout=timedelta(hours=2),
-)
-
-# Model availability check for predictions
-model_check = PythonOperator(
-    task_id="model_availability_check",
-    python_callable=check_model_availability,
-    dag=dag,
-)
-
-# Daily predictions
-daily_prediction = PipelineOperator(
-    task_id="daily_prediction",
-    stage_name="daily_prediction",
-    module_path="modeling.predict_daily",
-    stage_args=["--log-level", "INFO"],
-    dag=dag,
-)
-
-evaluate_predictions = PipelineOperator(
-    task_id="evaluate_predictions",
-    stage_name="evaluate_predictions",
-    module_path="modeling.predict_daily",
-    stage_args=["--evaluate", "--log-level", "INFO"],
-    dag=dag,
-)
-
-# Cleanup tasks
-cleanup_old_data_task = PythonOperator(
-    task_id="cleanup_old_data",
-    python_callable=cleanup_old_data,
-    dag=dag,
-    trigger_rule=TriggerRule.ALL_DONE,
-)
-
-# Success notification
-def send_success_notification(**context):
-    """Send success notification."""
-    send_pipeline_alert(
-        context, "Daily profit model pipeline completed successfully", "success"
-    )
-
-success_notification = PythonOperator(
-    task_id="success_notification",
-    python_callable=send_success_notification,
-    dag=dag,
-    trigger_rule=TriggerRule.ALL_SUCCESS,
-)
-
 # Define dependencies
-start_pipeline >> [health_check, data_freshness_check]
-
-[health_check, data_freshness_check] >> create_schema
-
-create_schema >> ingestion_start
-
-ingestion_start >> [
-    ingest_plans,
-    ingest_regimes,
-    ingest_metrics_alltime,
-    ingest_metrics_daily,
-    ingest_metrics_hourly,
-    ingest_trades_open,
-    ingest_trades_closed,
-]
-
-[
-    ingest_plans,
-    ingest_regimes,
-    ingest_metrics_alltime,
-    ingest_metrics_daily,
-    ingest_metrics_hourly,
-    ingest_trades_open,
-    ingest_trades_closed,
-] >> ingestion_complete
-
-ingestion_complete >> data_quality_check
-
-data_quality_check >> preprocessing
-
-preprocessing >> feature_engineering
-
-feature_engineering >> build_training_data
-
-# Training branch (conditional on day of week)
-build_training_data >> model_training
-
-# Prediction branch
-build_training_data >> model_check
-model_check >> daily_prediction
-daily_prediction >> evaluate_predictions
-
-# Final tasks
-[model_training, evaluate_predictions] >> cleanup_old_data_task
-cleanup_old_data_task >> success_notification
-success_notification >> end_pipeline
+start_pipeline >> testing >> ingestion >> preprocessing >> validation >> feature_engineering >> training >> prediction

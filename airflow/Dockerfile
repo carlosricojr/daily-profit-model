@@ -1,25 +1,27 @@
+# ---------------------------------------------------------------------------
+# Base image
+# ---------------------------------------------------------------------------
 FROM apache/airflow:3.0.2-python3.12
 
-USER root
+# ---------------------------------------------------------------------------
+# Install project dependencies as *root* (default user)                      
+# ---------------------------------------------------------------------------
 
-# Install any system dependencies if needed
-RUN apt-get update && apt-get install -y \
-    gcc \
-    python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Install UV (solver + installer)
+RUN pip install --no-cache-dir uv
 
+# Generate a fully locked wheel set from pyproject.toml at build time
+COPY pyproject.toml /tmp/pyproject.toml
+RUN uv pip compile --output-file /tmp/requirements.txt /tmp/pyproject.toml
+
+# Install all runtime dependencies (use pip to avoid permission edge-cases)
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
+
+# ---------------------------------------------------------------------------
+# Copy project source & switch to non-root airflow user for runtime
+# ---------------------------------------------------------------------------
+
+COPY src /opt/airflow/src
+
+# Change to airflow user for safety when the container runs
 USER airflow
-
-# Copy requirements file if you have custom Python dependencies
-# COPY requirements-airflow.txt /requirements-airflow.txt
-
-# Install custom Python packages
-RUN pip install --no-cache-dir \
-    pandas==2.1.4 \
-    sqlalchemy==2.0.23 \
-    psycopg2-binary==2.9.9 \
-    python-dotenv==1.0.0 \
-    requests==2.31.0
-
-# If you have a requirements file, uncomment:
-# RUN pip install --no-cache-dir -r /requirements-airflow.txt
