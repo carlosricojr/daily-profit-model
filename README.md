@@ -26,31 +26,65 @@ daily-profit-model/
 │   │   ├── indexes/               # Index management
 │   │   ├── maintenance/           # Automated maintenance scripts
 │   │   └── docs/                  # Schema documentation
-│   ├── data_ingestion/            # data ingestion (only fetches missing data)
-│   │   ├── ingest_metrics.py  # Smart metrics ingestion with precise hourly detection
-│   │   ├── ingest_trades_.py   # Smart trades ingestion with gap analysis
+│   ├── data_ingestion/            # Smart data ingestion (only fetches missing data)
+│   │   ├── base_ingester.py       # Base class for all ingesters
+│   │   ├── ingest_metrics.py      # Smart metrics ingestion with precise hourly detection
+│   │   ├── ingest_trades.py       # Smart trades ingestion with gap analysis
 │   │   ├── ingest_plans.py        # Plan data from CSV with validation
 │   │   ├── ingest_regimes.py      # Market regime data ingestion
-│   │   └── discover_active_logins.py      # Efficient account discovery
+│   │   ├── discover_active_logins.py  # Efficient account discovery
+│   │   └── checkpoints/           # Ingestion checkpoint files for crash recovery
+│   ├── data_quality/              # Data quality and reconciliation
+│   │   ├── trade_reconciliation_production.py  # Production reconciliation with API integration
+│   │   ├── trade_reconciliation.py            # Minimal test-only implementation
+│   │   └── maintain_trade_recon.py            # Maintenance utilities for reconciliation
 │   ├── preprocessing/             # Data quality and staging (v2 optimized)
-│   │   └── create_staging_snapshots.py  # Enhanced daily snapshots with quality checks
+│   │   ├── create_staging_snapshots.py  # Enhanced daily snapshots with quality checks
+│   │   ├── data_quality_validation.py  # Data quality validation framework
+│   │   ├── great_expectations_config.py  # Great Expectations configuration
+│   │   ├── anomaly_detector.py         # Anomaly detection utilities
+│   │   └── data_lineage.py             # Data lineage tracking
 │   ├── feature_engineering/       # Parallel feature processing (v2 optimized)
-│   │   ├── engineer_features.py   # Parallel feature computation (275% faster)
-│   │   └── build_training_data.py # Training data alignment with validation
+│   │   ├── feature_engineering.py # Parallel feature computation (275% faster)
+│   │   ├── build_training_data.py # Training data alignment with validation
+│   │   ├── monitor_features.py    # Feature monitoring and drift detection
+│   │   └── feature_catalog.md     # Feature documentation
 │   ├── modeling/                  # Advanced ML system (v2 optimized)
 │   │   ├── train_model.py         # Enhanced training with confidence intervals
 │   │   ├── predict_daily.py       # Advanced predictions with shadow deployment
 │   │   ├── model_manager.py       # Model lifecycle management
+│   │   ├── model_monitoring.py    # Real-time model performance monitoring
+│   │   ├── confidence_intervals.py # Confidence interval calculations
 │   │   └── archive/               # Previous optimization versions
 │   ├── pipeline_orchestration/    # Enhanced orchestration (v2 optimized)
-│   │   ├── run_pipeline_.py    # Main  orchestration
+│   │   ├── run_pipeline.py        # Main pipeline orchestration
+│   │   ├── pipeline_state.py      # Pipeline state management
+│   │   ├── retry_manager.py       # Retry logic and failure handling
 │   │   ├── health_checks.py       # Comprehensive health monitoring
-│   │   ├── sla_monitor.py         # SLA tracking and alerting
-│   │   └── airflow_dag.py         # Apache Airflow DAG for automation
+│   │   └── sla_monitor.py         # SLA tracking and alerting
+│   ├── testing/                   # Testing utilities
+│   │   └── test_health_check.py   # Health check tests
 │   └── utils/                     # Enhanced utilities (v2 optimized)
 │       ├── database.py            # Connection pooling and performance monitoring
-│       ├── api_client.py          # Rate-limited API client with retries
+│       ├── api_client.py          # Enhanced API client with circuit breaker
 │       └── logging_config.py      # Structured logging configuration
+├── airflow/                       # Apache Airflow configuration
+│   ├── dags/                      # Airflow DAGs
+│   │   ├── trade_reconciliation_dag.py     # Trade reconciliation DAG (nightly)
+│   │   └── daily_profit_model_dag.py       # Main pipeline DAG
+│   ├── logs/                      # Airflow logs
+│   ├── config/                    # Airflow configuration
+│   ├── airflow.cfg               # Airflow configuration file
+│   ├── docker-compose.yml         # Airflow deployment
+│   └── Dockerfile                 # Airflow Docker image
+├── supabase/                      # Supabase configuration
+│   ├── migrations/                # Database migrations
+│   │   ├── 20250613120000_trade_recon.sql        # Trade reconciliation tables
+│   │   ├── 20250615200000_trade_recon_final_setup.sql  # Optimized functions
+│   │   └── 20250615400000_fix_materialized_view_index.sql  # MV index fix
+│   └── tests/                     # Database tests
+├── tests/                         # Application tests
+│   └── test_trade_reconciliation.py  # Trade reconciliation tests
 ├── archive/                       # Archived optimization versions and analysis
 │   ├── db_schema_versions/        # All database schema versions (v1, v2, v3)
 │   ├── external-worktrees/        # Complete git worktree copies (21 versions)
@@ -61,10 +95,17 @@ daily-profit-model/
 ├── raw-data/                     # Raw data files
 │   └── plans/                    # CSV files with plan data
 ├── ai-docs/                      # AI-focused documentation
+│   ├── api-docs/                 # API documentation
+│   │   └── RiskAPIMetrics.md    # Risk Analytics API docs
+│   └── project-management/       # Project specifications
+│       └── trades-recon.md       # Trade reconciliation specification
 ├── pyproject.toml                # Project dependencies (optimized)
 ├── uv.lock                       # Locked dependencies
 ├── .env                          # Environment variables (not in git)
 ├── .gitignore
+├── QUICK_START_GUIDE.md          # Quick start guide for new users
+├── CLAUDE.local.md               # Claude AI specific instructions
+├── TRADE_RECONCILIATION_IMPLEMENTATION_SUMMARY.md  # Reconciliation docs
 └── README.md                     # This file
 ```
 
@@ -120,19 +161,19 @@ daily-profit-model/
    uv run --env-file .env -- psql -h $DB_HOST -U $DB_USER -d $DB_NAME -f src/db_schema/schema.sql
    ```
 
-   Or using the  pipeline:
+   Or using the pipeline:
    ```bash
-   uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py --stages schema
+   uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline.py --stages schema
    ```
 
 ## Running the Pipeline
 
 ### Full Pipeline Execution
 
-To run the complete  pipeline from data ingestion to predictions:
+To run the complete pipeline from data ingestion to predictions:
 
 ```bash
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline.py
 ```
 
 ### Running Specific Stages
@@ -140,21 +181,21 @@ uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py
 You can run individual stages or combinations:
 
 ```bash
-# Only  data ingestion
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py --stages ingestion
+# Only data ingestion
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline.py --stages ingestion
 
 # Preprocessing and feature engineering
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py --stages preprocessing feature_engineering
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline.py --stages preprocessing feature_engineering
 
 # Only daily predictions
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py --stages prediction
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline.py --stages prediction
 ```
 
 ### Individual Script Execution
 
 Each component can also be run independently:
 
-####  Data Ingestion
+#### Data Ingestion
 ```bash
 # Smart metrics ingestion (only fetches missing data)
 # Flow 1: Date range provided - gets missing daily, extracts accounts, updates alltime, fills hourly
@@ -164,8 +205,8 @@ uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics --start-da
 uv run --env-file .env -- python -m src.data_ingestion.ingest_metrics
 
 # Smart trades ingestion (only fetches missing data)
-uv run --env-file .env -- python -m src.data_ingestion.ingest_trades_ closed --start-date 2024-04-15 --end-date 2024-04-22
-uv run --env-file .env -- python -m src.data_ingestion.ingest_trades_ open
+uv run --env-file .env -- python -m src.data_ingestion.ingest_trades closed --start-date 2024-04-15 --end-date 2024-04-22
+uv run --env-file .env -- python -m src.data_ingestion.ingest_trades open
 
 # Ingest plans from CSV
 uv run --env-file .env -- python -m src.data_ingestion.ingest_plans
@@ -218,31 +259,31 @@ uv run --env-file .env -- python -m src.modeling.predict_daily --disable-shadow 
 
 ## Pipeline Options
 
-The  orchestration script supports several options:
+The orchestration script supports several options:
 
 ```bash
 # Dry run - see what would be executed without running
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py --dry-run
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline.py --dry-run
 
 # Force re-run of completed stages
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py --force
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline.py --force
 
-# Specify date range (enables  missing data detection)
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py \
+# Specify date range (enables missing data detection)
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline.py \
     --start-date 2024-01-01 \
     --end-date 2024-12-31
 
 # Set logging level
-uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py --log-level DEBUG
+uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline.py --log-level DEBUG
 ```
 
 ## Daily Operation Workflow
 
-For daily operations with  pipeline, you would typically:
+For daily operations, you would typically:
 
-1. **Morning:  ingestion of only missing data and generate predictions**
+1. **Morning: Smart ingestion of only missing data and generate predictions**
    ```bash
-   uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py \
+   uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline.py \
        --stages ingestion preprocessing feature_engineering prediction
    ```
 
@@ -253,13 +294,62 @@ For daily operations with  pipeline, you would typically:
 
 3. **Weekly/Monthly: Retrain model with new data**
    ```bash
-   uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline_.py \
+   uv run --env-file .env -- python src/pipeline_orchestration/run_pipeline.py \
        --stages feature_engineering training
    ```
 
+4. **Nightly: Trade reconciliation (automated via Airflow)**
+   - Runs automatically at 11 PM ET
+   - Detects and resolves data quality issues
+   - Fetches missing data via API
+
+## Trade Reconciliation System
+
+The project includes a comprehensive trade data reconciliation system that ensures data integrity across all trading-related tables:
+
+### Features
+- **Automated Issue Detection**: Identifies 7 types of data quality issues
+  - NULL account_ids in trade tables
+  - Missing metrics across tables (alltime/daily/hourly)
+  - Trade count mismatches between sources
+  - Missing daily/hourly alignment
+  - Hourly/daily trade count discrepancies
+- **Automatic Resolution via API**: Fetches missing data automatically
+- **Batch Processing**: Handles 500K+ accounts efficiently
+- **Failed Attempt Tracking**: Prevents infinite retry loops
+- **Comprehensive Monitoring**: JSONB issue tracking and reporting
+
+### Running Trade Reconciliation
+
+```bash
+# Run via Airflow (recommended - runs nightly at 11 PM ET)
+docker compose exec airflow-worker airflow dags trigger trade_reconciliation
+
+# Manual execution for testing
+uv run --env-file .env -- python -m src.data_quality.trade_reconciliation_production --fix-null-ids
+uv run --env-file .env -- python -m src.data_quality.trade_reconciliation_production --reconcile --max-accounts 10
+uv run --env-file .env -- python -m src.data_quality.trade_reconciliation_production --report
+```
+
+### Monitoring Reconciliation Status
+
+```sql
+-- Check overall reconciliation progress
+SELECT * FROM prop_trading_model.v_reconciliation_progress;
+
+-- View issue breakdown by type
+SELECT * FROM prop_trading_model.get_issue_statistics();
+
+-- Check specific account issues
+SELECT account_id, issues, last_checked, failed_attempts
+FROM prop_trading_model.trade_recon
+WHERE jsonb_array_length(issues) > 0
+LIMIT 10;
+```
+
 ## Enterprise Features
 
-###  Data Pipeline
+### Smart Data Pipeline
 
 - **Smart Data Fetching**: Only fetches missing data, reducing API calls by 90%+
 - **Automatic Gap Detection**: SQL-based detection of missing daily, hourly, and trade data
@@ -281,12 +371,13 @@ For daily operations with  pipeline, you would typically:
 
 ### Production Optimizations
 
-- ** Data Ingestion**: Only fetches missing data, 90%+ reduction in API calls
+- **Smart Data Ingestion**: Only fetches missing data, 90%+ reduction in API calls
 - **High-throughput Processing**: 15K records/sec ingestion with SQLite checkpointing
 - **Parallel Feature Engineering**: 275% performance improvement with concurrent processing
 - **Database Optimization**: 80% faster queries with partitioning and materialized views
 - **Connection Pooling**: Efficient database connection management
-- **Circuit Breakers**: Fault tolerance with automatic retry mechanisms
+- **Enhanced API Client**: Circuit breaker pattern, token bucket rate limiting, connection pooling
+- **Trade Reconciliation**: Automated data quality monitoring with API-based resolution
 
 ### Quality Assurance
 
@@ -461,4 +552,4 @@ For questions or issues, please contact the development team or create an issue 
 
 ---
 
-*This system represents an enterprise-grade machine learning pipeline with  data ingestion, advanced monitoring, shadow deployment, and production optimization features. The  pipeline only fetches missing data, reducing processing time and API costs by 90%+ while providing automatic crash recovery and gap detection.*
+*This system represents an enterprise-grade machine learning pipeline with smart data ingestion, advanced monitoring, shadow deployment, trade reconciliation, and production optimization features. The pipeline only fetches missing data, reducing processing time and API costs by 90%+ while providing automatic crash recovery, gap detection, and data quality monitoring with automated resolution.*
