@@ -1,3 +1,6 @@
+# AI Test Scripts
+ai-test-scripts/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -199,3 +202,35 @@ ai-docs/
 
 # Ignore raw data
 raw-data/
+
+# Ignore git worktrees
+archive/
+
+# Ignore repomix generated files
+repomix-output.txt
+
+# Ignore claude
+.claude/
+
+# Ignore logs
+logs/
+src/logs/
+
+# Ignore src/checkpoints
+src/checkpoints/
+
+# Ignore src/db_schema/auto_migrations & archive
+src/db_schema/auto_migrations/
+src/db_schema/archive/
+
+# Ignore frontend
+alpex-frontend/
+
+# MCP
+.mcp.json
+
+# Ignore node for supa
+node_modules/
+package-lock.json
+package.json
+.vscode/

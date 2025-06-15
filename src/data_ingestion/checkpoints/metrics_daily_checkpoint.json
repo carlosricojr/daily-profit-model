@@ -1,0 +1,20 @@
+{
+  "metric_type": "daily",
+  "completion_time": "2025-06-11T03:49:34.462631",
+  "total_records": 724362,
+  "metrics": {
+    "total_records": 0,
+    "new_records": 724362,
+    "duplicate_records": 0,
+    "invalid_records": 496766,
+    "api_calls": 0,
+    "api_errors": 0,
+    "db_errors": 0,
+    "validation_errors": {},
+    "start_time": 1749625144.45784,
+    "processing_time": 3030.004805088043,
+    "records_per_second": 0.0
+  },
+  "timestamp": "2025-06-11T03:49:34.462648",
+  "ingestion_type": "metrics_daily"
+}
