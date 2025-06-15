@@ -277,6 +277,10 @@ class EnhancedModelTrainer:
                 pipeline_stage="train_model",
                 execution_date=datetime.now().date(),
                 status="running",
+                execution_time_seconds=0,
+                records_processed=0,
+                error_message=None,
+                records_failed=0,
             )
 
             logger.info(
@@ -387,9 +391,12 @@ class EnhancedModelTrainer:
                 pipeline_stage="train_model",
                 execution_date=datetime.now().date(),
                 status="success",
+                execution_time_seconds=training_duration,
+                records_processed=len(X),
+                error_message=None,
+                records_failed=0,
                 execution_details={
                     "model_version": self.model_version,
-                    "duration_seconds": training_duration,
                     "test_mae": metrics["test_mae"],
                     "improvement_over_baseline": metrics["improvement_over_baseline"],
                     "degradation_status": degradation_check["status"],
@@ -434,7 +441,10 @@ class EnhancedModelTrainer:
                 pipeline_stage="train_model",
                 execution_date=datetime.now().date(),
                 status="failed",
+                execution_time_seconds=(datetime.now() - start_time).total_seconds(),
+                records_processed=0,
                 error_message=str(e),
+                records_failed=0,
             )
             logger.error(f"Enhanced model training failed: {str(e)}")
             raise

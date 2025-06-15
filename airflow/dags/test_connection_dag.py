@@ -13,7 +13,6 @@ from airflow.providers.standard.operators.empty import EmptyOperator
 
 logger = logging.getLogger(__name__)
 
-
 def test_environment(**context):
     """Test basic environment setup."""
     print("=== Environment Test ===")
@@ -31,7 +30,6 @@ def test_environment(**context):
             print(f"{key}: NOT SET")
     
     return True
-
 
 def test_postgres_hook(**context):
     """Test PostgresHook connection."""
@@ -51,12 +49,12 @@ def test_postgres_hook(**context):
         
         # Try a simple query
         cursor = conn.cursor()
-        cursor.execute("SELECT 1")
+        cursor.execute("SELECT COUNT(account_id) FROM prop_trading_model.raw_metrics_alltime")
         result = cursor.fetchone()
         cursor.close()
         conn.close()
         
-        print(f"Query result: {result}")
+        print(f"Query result (current count of rows in raw_metrics_alltime): {result}")
         return True
         
     except Exception as e:
@@ -65,17 +63,17 @@ def test_postgres_hook(**context):
         traceback.print_exc()
         return False
 
-
 def test_database_manager(**context):
     """Test DatabaseManager connection."""
     print("=== DatabaseManager Test ===")
     
     try:
         # Add src to path
-        from pathlib import Path
-        project_root = Path(__file__).parent.parent.parent
-        sys.path.append(str(project_root / "src"))
-        print(f"Added to path: {project_root / 'src'}")
+        src_path = "/opt/airflow/src"
+        if src_path not in sys.path:
+            sys.path.insert(0, src_path)
+        print(f"Added to path: {src_path}")
+        print(f"current sys.path: {sys.path[:5]}...")
         
         # Try to import
         from utils.database import get_db_manager
@@ -86,8 +84,8 @@ def test_database_manager(**context):
         print("DatabaseManager created successfully")
         
         # Try a simple query
-        result = db_manager.model_db.execute_query("SELECT 1 as check")
-        print(f"Query result: {result}")
+        result = db_manager.model_db.execute_query("SELECT COUNT(account_id) FROM prop_trading_model.raw_metrics_alltime")
+        print(f"Query result (current count of rows in raw_metrics_alltime): {result}")
         return True
         
     except Exception as e:
@@ -95,7 +93,6 @@ def test_database_manager(**context):
         import traceback
         traceback.print_exc()
         return False
-
 
 # Create test DAG
 dag = DAG(

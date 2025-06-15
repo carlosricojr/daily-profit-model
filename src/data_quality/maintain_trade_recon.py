@@ -25,9 +25,23 @@ def refresh_all_account_ids() -> None:
 
     with db_manager.model_db.get_connection() as conn:
         with conn.cursor() as cur:
-            # Refresh materialised view (fast when concurrent_refresh is true)
+            # Refresh materialised view (try concurrent first, fall back to regular)
             logger.info("Refreshing mv_all_account_ids …")
-            cur.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY prop_trading_model.mv_all_account_ids")
+            try:
+                cur.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY prop_trading_model.mv_all_account_ids")
+                logger.info("Materialized view refreshed successfully (concurrent mode)")
+            except Exception as e:
+                error_msg = str(e)
+                logger.warning(f"Concurrent refresh failed: {error_msg}")
+                
+                # If it's a concurrent refresh issue, fall back to regular refresh
+                if "concurrently" in error_msg.lower() or "ObjectNotInPrerequisiteState" in str(type(e)):
+                    logger.info("Falling back to non-concurrent refresh")
+                    cur.execute("REFRESH MATERIALIZED VIEW prop_trading_model.mv_all_account_ids")
+                    logger.info("Materialized view refreshed successfully (non-concurrent mode)")
+                else:
+                    # Re-raise if it's a different error
+                    raise
 
             logger.info("Inserting new account_ids into trade_recon …")
             cur.execute(

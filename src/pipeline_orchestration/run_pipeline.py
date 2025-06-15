@@ -8,9 +8,12 @@ import sys
 import logging
 import argparse
 from datetime import datetime, timedelta, date
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 import subprocess
 from pathlib import Path
+
+# External testing runners
+from testing.test_jobs import run_all_tests
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,10 +34,12 @@ class PipelineOrchestrator:
 
         # Pipeline stages configuration
         self.stages = {
-            "schema": {
-                "name": "Database Schema Management",
-                "script": None,  # Special handling - schema migration
-                "module": None,
+            "testing": {
+                "name": "Test Codebase and Database",
+                "scripts": [
+                    ("test_db", "testing.test_db"),
+                    ("test_codebase", "testing.test_codebase"),
+                ],
             },
             "ingestion": {
                 "name": "Data Ingestion",
@@ -84,8 +89,6 @@ class PipelineOrchestrator:
         end_date: Optional[date] = (datetime.now() - timedelta(days=1)).date(),
         skip_completed: bool = True,
         dry_run: bool = False,
-        force_recreate_schema: bool = False,
-        preserve_data: bool = True,
         force_full_refresh: bool = False,
         enable_great_expectations: bool = True,
     ) -> Dict[str, Any]:
@@ -98,8 +101,6 @@ class PipelineOrchestrator:
             end_date: End date for data processing
             skip_completed: Skip stages that have already completed successfully today
             dry_run: If True, only show what would be executed
-            force_recreate_schema: If True, drop and recreate schema (loses all data!)
-            preserve_data: If True, preserve existing data during schema migrations
             force_full_refresh: If True, ignore existing data and fetch everything
             enable_great_expectations: If True, use Great Expectations for validation
 
@@ -120,7 +121,6 @@ class PipelineOrchestrator:
 
         logger.info(f"Pipeline execution started at {start_time}")
         logger.info(f"Stages to run: {stages}")
-        logger.info("Mode: Only fetching missing data")
         logger.info(f"Great Expectations enabled: {enable_great_expectations}")
 
         if dry_run:
@@ -135,14 +135,8 @@ class PipelineOrchestrator:
             logger.info(f"{'=' * 60}")
 
             try:
-                if stage_name == "schema":
-                    # Special handling for schema management
-                    self._create_schema(
-                        force_recreate=force_recreate_schema,
-                        preserve_data=preserve_data,
-                        dry_run=dry_run
-                    )
-                    results[stage_name] = {"status": "success", "duration": 0}
+                if stage_name == "testing":
+                    results[stage_name] = run_all_tests(self.src_dir, dry_run=dry_run)
 
                 elif stage_name == "ingestion":
                     results[stage_name] = self._run_ingestion(
@@ -198,76 +192,6 @@ class PipelineOrchestrator:
             logger.info(f"{stage_name}: {status} ({duration:.2f}s)")
 
         return results
-
-    def _create_schema(self, force_recreate=False, preserve_data=True, dry_run=False):
-        """
-        Ensure database schema compliance with desired state.
-        
-        Args:
-            force_recreate: If True, drop and recreate schema (old behavior)
-            preserve_data: If True, preserve existing data during migrations
-            dry_run: If True, only show what would be done
-        """
-        schema_file = self.src_dir / "db_schema" / "schema.sql"
-
-        if not schema_file.exists():
-            raise FileNotFoundError(f"Schema file not found: {schema_file}")
-
-        logger.info(f"Checking database schema compliance with {schema_file}")
-        
-        if force_recreate:
-            logger.warning("FORCE RECREATE: This will DROP and recreate the entire prop_trading_model schema!")
-            if not dry_run:
-                # Read schema file
-                with open(schema_file, "r") as f:
-                    schema_sql = f.read()
-                
-                # Execute schema creation (old behavior)
-                with self.db_manager.model_db.get_connection() as conn:
-                    with conn.cursor() as cursor:
-                        cursor.execute(schema_sql)
-                        conn.commit()
-                
-                logger.info("Database schema recreated successfully")
-            else:
-                logger.info("DRY RUN: Would drop and recreate entire schema")
-        else:
-            # With our new simplified setup, we can check if schema exists
-            # and create it if needed, or just log that it's already present
-            logger.info("Checking if database schema exists...")
-            
-            # Check if key tables exist
-            tables_to_check = [
-                "raw_metrics_daily", "raw_metrics_hourly", "raw_metrics_alltime",
-                "raw_trades_closed", "raw_trades_open", "raw_regimes_daily",
-                "stg_accounts_daily_snapshots", "feature_store_account_daily",
-                "model_registry", "model_predictions"
-            ]
-            
-            missing_tables = []
-            for table in tables_to_check:
-                if not self.db_manager.model_db.table_exists(table):
-                    missing_tables.append(table)
-            
-            if missing_tables:
-                logger.warning(f"Missing tables: {missing_tables}")
-                if not dry_run:
-                    logger.info("Creating database schema...")
-                    # Read schema file
-                    with open(schema_file, "r") as f:
-                        schema_sql = f.read()
-                    
-                    # Execute schema creation
-                    with self.db_manager.model_db.get_connection() as conn:
-                        with conn.cursor() as cursor:
-                            cursor.execute(schema_sql)
-                            conn.commit()
-                    
-                    logger.info("Database schema created successfully")
-                else:
-                    logger.info(f"DRY RUN: Would create {len(missing_tables)} missing tables")
-            else:
-                logger.info("Database schema is already compliant. All tables exist.")
 
     def _run_ingestion(
         self,
@@ -815,7 +739,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Available stages:
-  schema              - Ensure database schema compliance (migrates without data loss)
+  testing            - Ensure database and codebase tests pass
   ingestion          - Ingest only missing data from APIs and CSV files
   preprocessing      - Create staging snapshots and clean data
   validation         - Comprehensive data quality validation with Great Expectations
@@ -833,12 +757,6 @@ Key differences from original pipeline:
 Examples:
   # Run the entire pipeline with date range (only fetches missing data)
   python run_pipeline.py --start-date 2025-06-05 --end-date 2025-06-10
-  
-  # Check what schema changes would be made without applying them
-  python run_pipeline.py --stages schema --dry-run
-  
-  # Force recreate schema from scratch (DESTROYS ALL DATA!)
-  python run_pipeline.py --stages schema --force-recreate-schema
   
   # Run only ingestion and preprocessing with date range
   python run_pipeline.py --stages ingestion preprocessing --start-date 2025-06-05 --end-date 2025-06-10
@@ -864,7 +782,7 @@ Examples:
         "--stages",
         nargs="+",
         choices=[
-            "schema",
+            "testing",
             "ingestion",
             "preprocessing",
             "validation",
@@ -892,16 +810,6 @@ Examples:
         "--dry-run",
         action="store_true",
         help="Show what would be executed without running",
-    )
-    parser.add_argument(
-        "--force-recreate-schema",
-        action="store_true",
-        help="Force drop and recreate schema (DESTROYS ALL DATA!)",
-    )
-    parser.add_argument(
-        "--no-preserve-data",
-        action="store_true",
-        help="Don't preserve data during schema migrations (faster but destructive)",
     )
     parser.add_argument(
         "--force-full-refresh",
@@ -938,8 +846,6 @@ Examples:
             end_date=args.end_date,
             skip_completed=not args.force,
             dry_run=args.dry_run,
-            force_recreate_schema=args.force_recreate_schema,
-            preserve_data=not args.no_preserve_data,
             force_full_refresh=args.force_full_refresh,
             enable_great_expectations=not args.no_great_expectations,
         )

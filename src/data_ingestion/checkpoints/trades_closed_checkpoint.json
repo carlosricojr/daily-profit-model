@@ -1,7 +1,7 @@
 {
-  "last_processed_date": "2025-06-12",
-  "total_records": 478223,
-  "new_records": 475000,
-  "timestamp": "2025-06-13T06:37:01.120732",
+  "last_processed_date": "2025-01-09 00:00:00+00:00",
+  "total_records": 75227,
+  "new_records": 75000,
+  "timestamp": "2025-06-15T00:15:53.651557",
   "ingestion_type": "trades_closed"
 }

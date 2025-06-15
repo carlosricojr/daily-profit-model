@@ -197,12 +197,28 @@ class TradeReconciliation:  # pragma: no cover – validated indirectly by tests
 def fix_all_null_account_ids() -> Dict[str, int]:
     """Update NULL account_id rows in both closed & open trade tables."""
     db = get_db_manager().model_db
-    closed_updated = db.execute_update(
-        "UPDATE prop_trading_model.raw_trades_closed SET account_id = md5(login || platform || broker) WHERE account_id IS NULL"
-    )
-    open_updated = db.execute_update(
-        "UPDATE prop_trading_model.raw_trades_open SET account_id = md5(login || platform || broker) WHERE account_id IS NULL"
-    )
+    
+    # Fix closed trades by looking up actual account_id from raw_metrics_alltime
+    closed_updated = db.execute_update("""
+        UPDATE prop_trading_model.raw_trades_closed t
+        SET account_id = m.account_id
+        FROM prop_trading_model.raw_metrics_alltime m
+        WHERE t.login = m.login
+        AND t.platform = m.platform
+        AND t.broker = m.broker
+        AND t.account_id IS NULL
+    """)
+    
+    # Fix open trades by looking up actual account_id from raw_metrics_alltime
+    open_updated = db.execute_update("""
+        UPDATE prop_trading_model.raw_trades_open t
+        SET account_id = m.account_id
+        FROM prop_trading_model.raw_metrics_alltime m
+        WHERE t.login = m.login
+        AND t.platform = m.platform
+        AND t.broker = m.broker
+        AND t.account_id IS NULL
+    """)
     # Optional verification – not checked by tests but kept to mirror reality.
     _ = db.execute_query("SELECT 1")  # no-op to satisfy side-effect expectations
     return {

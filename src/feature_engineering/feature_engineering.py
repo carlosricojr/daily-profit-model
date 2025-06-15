@@ -610,7 +610,7 @@ class UnifiedFeatureEngineer:
         query = """
         SELECT 
             account_id,
-            date,
+            snapshot_date as date,
             starting_balance,
             max_daily_drawdown_pct,
             max_drawdown_pct,
@@ -622,7 +622,7 @@ class UnifiedFeatureEngineer:
             CASE WHEN daily_drawdown_by_balance_equity THEN 1 ELSE 0 END as daily_drawdown_by_balance_equity,
             CASE WHEN enable_consistency THEN 1 ELSE 0 END as enable_consistency
         FROM stg_accounts_daily_snapshots
-        WHERE account_id = ANY(%s) AND date = ANY(%s)
+        WHERE account_id = ANY(%s) AND snapshot_date = ANY(%s)
         """
 
         results = self.db_manager.model_db.execute_query(query, (account_ids, dates))
@@ -657,15 +657,15 @@ class UnifiedFeatureEngineer:
         query = """
         SELECT 
             account_id,
-            date,
-            current_balance,
-            current_equity,
-            days_since_first_trade,
-            active_trading_days_count,
+            snapshot_date as date,
+            balance as current_balance,
+            equity as current_equity,
+            days_since_last_trade as days_since_first_trade,
+            days_active as active_trading_days_count,
             distance_to_profit_target,
             distance_to_max_drawdown
         FROM stg_accounts_daily_snapshots
-        WHERE account_id = ANY(%s) AND date = ANY(%s)
+        WHERE account_id = ANY(%s) AND snapshot_date = ANY(%s)
         """
 
         results = self.db_manager.model_db.execute_query(query, (account_ids, dates))
@@ -696,7 +696,7 @@ class UnifiedFeatureEngineer:
         SELECT 
             account_id,
             trade_date,
-            SUM(unrealized_pnl) as open_pnl,
+            SUM(unrealized_profit) as open_pnl,
             SUM(volume_usd) as open_positions_volume
         FROM raw_trades_open
         WHERE account_id = ANY(%s) AND trade_date = ANY(%s)

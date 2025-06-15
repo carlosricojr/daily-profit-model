@@ -6,7 +6,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo -e "${GREEN}Building custom Airflow image…${NC}"
-docker compose build airflow-webserver
+docker compose build
 
 echo -e "${GREEN}Starting Airflow & Postgres containers…${NC}"
 docker compose up -d

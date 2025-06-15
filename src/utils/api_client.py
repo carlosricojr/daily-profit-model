@@ -12,7 +12,7 @@ from datetime import datetime
 import requests
 from urllib.parse import urljoin
 from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
+from urllib3.util.retry import Retry
 from collections import defaultdict
 
 logger = logging.getLogger(__name__)
@@ -387,17 +387,15 @@ class RiskAnalyticsAPIClient:
 
         url = urljoin(self.base_url, endpoint)
 
-        # Add API key as query parameter
+        # Prepare parameters without API key
         if params is None:
             params = {}
-        params["apiKey"] = self.api_key
 
-        # Log the request (hide API key in logs)
-        log_params = {k: v for k, v in params.items() if k != "apiKey"}
+        # Log the request (API key will be in headers, not visible in logs)
         logger.info(f"API Request: {method} {url}", extra={
-            "params": log_params,
+            "params": params,
             "has_request_body": data is not None,
-            "full_url": f"{url}?{'&'.join([f'{k}={v}' for k, v in log_params.items()])}",
+            "full_url": f"{url}?{'&'.join([f'{k}={v}' for k, v in params.items()])}" if params else url,
             "timeout": timeout
         })
 
@@ -412,11 +410,18 @@ class RiskAnalyticsAPIClient:
         start_time = time.time()
 
         try:
+            # Prepare headers with API key
+            headers = {
+                "apiKey": self.api_key,
+                "Content-Type": "application/json"
+            }
+            
             response = session.request(
                 method=method,
                 url=url,
                 params=params,
                 json=data,
+                headers=headers,
                 timeout=timeout,
             )
 

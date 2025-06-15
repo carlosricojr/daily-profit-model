@@ -81,19 +81,20 @@ class DatabaseConnection:
         """Execute a SELECT query and return results as list of dicts."""
         with self.get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(query, params or {})
+                cur.execute(query, params)
                 return [dict(row) for row in cur.fetchall()]
     
     def execute_query_df(self, query: str, params: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
         """Execute a SELECT query and return results as pandas DataFrame."""
-        with self.engine.connect() as conn:
-            return pd.read_sql_query(text(query), conn, params=params)
+        # Use raw psycopg2 connection for pandas compatibility
+        with self.get_connection() as conn:
+            return pd.read_sql_query(query, conn, params=params)
     
     def execute_command(self, query: str, params: Optional[Dict[str, Any]] = None) -> int:
         """Execute an INSERT/UPDATE/DELETE command and return affected rows."""
         with self.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(query, params or {})
+                cur.execute(query, params)
                 return cur.rowcount
     
     # Alias used by some higher-level modules/tests

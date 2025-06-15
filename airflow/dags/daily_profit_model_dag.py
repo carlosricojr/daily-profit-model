@@ -4,7 +4,7 @@ Provides workflow orchestration with advanced monitoring and retry capabilities.
 """
 
 from datetime import datetime, timedelta
-from typing import Dict, Any
+from typing import Any
 import logging
 import os
 import sys
@@ -12,7 +12,7 @@ from pathlib import Path
 from functools import partial
 
 # Add project root to Python path for imports
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root / "src"))
 
 # Set environment variables from parent .env if needed
@@ -25,8 +25,6 @@ from airflow import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.models import Variable
-from airflow.providers.postgres.hooks.postgres import PostgresHook
-from airflow.utils.email import send_email
 from airflow.utils.trigger_rule import TriggerRule
 from airflow.timetables.trigger import CronTriggerTimetable
 
@@ -179,4 +177,4 @@ end_pipeline = EmptyOperator(
 )
 
 # Define dependencies
-start_pipeline >> testing >> ingestion >> preprocessing >> validation >> feature_engineering >> training >> prediction
+start_pipeline >> testing >> ingestion >> preprocessing >> validation >> feature_engineering >> training >> prediction >> end_pipeline
