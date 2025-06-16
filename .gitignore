@@ -132,6 +132,9 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+!.env.example
+!.env.*.example
 .venv
 env/
 venv/
@@ -229,8 +232,67 @@ alpex-frontend/
 # MCP
 .mcp.json
 
-# Ignore node for supa
+# Ignore node for supabase
 node_modules/
 package-lock.json
 package.json
 .vscode/
+
+# Security - ignore all credential and certificate files
+*.pem
+*.key
+*.cert
+*.p12
+*.pfx
+*.jks
+credentials*
+secrets*
+!src/utils/secrets_manager.py
+*_credentials.json
+*_key.json
+service-account*.json
+
+# Local configuration files
+config.local.*
+*.local.yaml
+*.local.yml
+*.local.json
+!*.example
+!*.sample
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.orig
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Database dumps and backups
+*.sql
+*.dump
+*.db
+!src/db_schema/**/*.sql
+
+# IDE and editor files
+.idea/
+*.iml
+.eclipse/
+.project
+.classpath
+*.sublime-*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Jupyter notebook outputs with potential data
+*.ipynb
+!*-template.ipynb
+!*-example.ipynb
