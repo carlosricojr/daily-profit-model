@@ -13,7 +13,6 @@ place.
 """
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 # The tests monkey-patch this symbol *before* importing the module so we must

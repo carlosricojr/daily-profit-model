@@ -32,7 +32,6 @@ daily-profit-model/
 │   │   ├── ingest_trades.py       # Smart trades ingestion with gap analysis
 │   │   ├── ingest_plans.py        # Plan data from CSV with validation
 │   │   ├── ingest_regimes.py      # Market regime data ingestion
-│   │   ├── discover_active_logins.py  # Efficient account discovery
 │   │   └── checkpoints/           # Ingestion checkpoint files for crash recovery
 │   ├── data_quality/              # Data quality and reconciliation
 │   │   ├── trade_reconciliation_production.py  # Production reconciliation with API integration

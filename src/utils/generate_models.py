@@ -80,14 +80,14 @@ def generate_models(output_file: str = "src/db_schema/models.py") -> bool:
         "--outfile", output_file
     ]
     
-    print(f"🔄 Generating SQLAlchemy models from database...")
+    print("🔄 Generating SQLAlchemy models from database...")
     print(f"   Tables: {len(tables)} core tables")
     print(f"   Output: {output_file}")
     
     # Run sqlacodegen
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        print(f"✅ Models generated successfully!")
+        subprocess.run(cmd, capture_output=True, text=True, check=True)
+        print("✅ Models generated successfully!")
         print(f"   File: {output_file}")
         
         # Show summary
@@ -99,7 +99,7 @@ def generate_models(output_file: str = "src/db_schema/models.py") -> bool:
         return True
         
     except subprocess.CalledProcessError as e:
-        print(f"❌ Error generating models:")
+        print("❌ Error generating models:")
         print(f"   {e.stderr}")
         return False
     except Exception as e:
@@ -109,7 +109,7 @@ def generate_models(output_file: str = "src/db_schema/models.py") -> bool:
 
 def verify_models(model_file: str = "src/db_schema/models.py") -> bool:
     """Verify the generated models can be imported."""
-    print(f"\n🔍 Verifying generated models...")
+    print("\n🔍 Verifying generated models...")
     
     try:
         # Add src to path
@@ -124,7 +124,7 @@ def verify_models(model_file: str = "src/db_schema/models.py") -> bool:
             if name[0].isupper() and hasattr(getattr(models, name), '__tablename__')
         ]
         
-        print(f"✅ Models verified!")
+        print("✅ Models verified!")
         print(f"   Importable classes: {len(model_classes)}")
         print(f"   Examples: {', '.join(model_classes[:5])}...")
         

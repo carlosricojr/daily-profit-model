@@ -13,19 +13,18 @@ import time
 from collections import defaultdict
 from itertools import product
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
 from threading import Lock as _ThreadLock, current_thread as _cur_thread
 from os import cpu_count as _cpu_count
 
 # Ensure we can import from parent directories
 try:
-    from .base_ingester import BaseIngester, IngestionMetrics, CheckpointManager, timed_operation, TimedBlock
+    from .base_ingester import BaseIngester, IngestionMetrics, CheckpointManager, timed_operation
     from ..utils.api_client import RiskAnalyticsAPIClient
     from ..utils.logging_config import get_logger
 except ImportError:
     # Fallback for direct execution
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from data_ingestion.base_ingester import BaseIngester, IngestionMetrics, CheckpointManager, timed_operation, TimedBlock
+    from data_ingestion.base_ingester import BaseIngester, IngestionMetrics, CheckpointManager, timed_operation
     from utils.api_client import RiskAnalyticsAPIClient
     from utils.logging_config import get_logger
 
@@ -713,6 +712,16 @@ class MetricsIngester(BaseIngester):
                     
                     for record in records:
                         transformed = self._transform_hourly_metric(record)
+                        
+                        # Skip test accounts: if account_id is NULL and any of login/platform/broker is NULL
+                        if transformed.get('account_id') is None:
+                            if (transformed.get('login') is None or 
+                                transformed.get('platform') is None or 
+                                transformed.get('broker') is None):
+                                logger.debug(f"Skipping test account record: login={transformed.get('login')}, "
+                                           f"platform={transformed.get('platform')}, broker={transformed.get('broker')}")
+                                continue
+                        
                         batch_data.append(transformed)
                         
                         if len(batch_data) >= self.config.batch_size:
@@ -1203,6 +1212,16 @@ class MetricsIngester(BaseIngester):
                     
                     for record in records:
                         transformed = self._transform_alltime_metric(record)
+                        
+                        # Skip test accounts: if account_id is NULL and any of login/platform/broker is NULL
+                        if transformed.get('account_id') is None:
+                            if (transformed.get('login') is None or 
+                                transformed.get('platform') is None or 
+                                transformed.get('broker') is None):
+                                logger.debug(f"Skipping test account record: login={transformed.get('login')}, "
+                                           f"platform={transformed.get('platform')}, broker={transformed.get('broker')}")
+                                continue
+                        
                         batch_data.append(transformed)
                         
                         # Insert in batches to avoid memory issues
@@ -1268,6 +1287,16 @@ class MetricsIngester(BaseIngester):
                     
                     for record in records:
                         transformed = self._transform_daily_metric(record)
+                        
+                        # Skip test accounts: if account_id is NULL and any of login/platform/broker is NULL
+                        if transformed.get('account_id') is None:
+                            if (transformed.get('login') is None or 
+                                transformed.get('platform') is None or 
+                                transformed.get('broker') is None):
+                                logger.debug(f"Skipping test account record: login={transformed.get('login')}, "
+                                           f"platform={transformed.get('platform')}, broker={transformed.get('broker')}")
+                                continue
+                        
                         batch_data.append(transformed)
                         
                         if len(batch_data) >= self.config.batch_size:
@@ -1320,6 +1349,16 @@ class MetricsIngester(BaseIngester):
                     ):
                         for record in records:
                             transformed = self._transform_daily_metric(record)
+                            
+                            # Skip test accounts: if account_id is NULL and any of login/platform/broker is NULL
+                            if transformed.get('account_id') is None:
+                                if (transformed.get('login') is None or 
+                                    transformed.get('platform') is None or 
+                                    transformed.get('broker') is None):
+                                    logger.debug(f"Skipping test account record: login={transformed.get('login')}, "
+                                               f"platform={transformed.get('platform')}, broker={transformed.get('broker')}")
+                                    continue
+                            
                             batch_data.append(transformed)
                             
                             if len(batch_data) >= self.config.batch_size:

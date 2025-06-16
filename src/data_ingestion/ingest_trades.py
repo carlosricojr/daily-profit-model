@@ -9,8 +9,8 @@ from datetime import datetime, timedelta, date, UTC as _UTC
 from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
 from threading import Lock as _ThreadLock
+import time
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -281,39 +281,58 @@ class TradesIngester(BaseIngester):
     ) -> List[Tuple[date, date]]:
         """
         Get date ranges that are missing closed trades data.
+        Enhanced with API count checking to detect partial data.
         Returns list of (start, end) date tuples for missing ranges.
         """
-        # Build filter conditions
-        conditions = ["trade_date BETWEEN %s AND %s"]
-        params = [start_date, end_date]
+        missing_dates = []
         
-        if logins:
-            conditions.append("login = ANY(%s)")
-            params.append(logins)
-        if symbols:
-            conditions.append("std_symbol = ANY(%s)")
-            params.append(symbols)
-        
-        where_clause = " AND ".join(conditions)
-        
-        # More efficient anti-join that probes one partition per day
-        query = f"""
-            SELECT gs.date
-            FROM generate_series(%s::date, %s::date, '1 day') AS gs(date)
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM prop_trading_model.raw_trades_closed rc
-                WHERE rc.trade_date = gs.date
-                  AND {where_clause}
+        # Check each day in the range
+        current_date = start_date
+        while current_date <= end_date:
+            # First, check API count
+            date_str = self.api_client.format_date(current_date)
+            api_count = self.api_client.get_trade_count(
+                trade_type="closed",
+                trade_date=date_str
             )
-            ORDER BY gs.date
-        """
-        
-        results = self.db_manager.model_db.execute_query(
-            query, [start_date, end_date] + params
-        )
-        
-        missing_dates = [row["date"] for row in results]
+            
+            # Get database count
+            db_count_query = """
+                SELECT COUNT(*) as count
+                FROM prop_trading_model.raw_trades_closed
+                WHERE trade_date = %s
+            """
+            
+            # Add filters if specified
+            params = [current_date]
+            if logins:
+                db_count_query += " AND login = ANY(%s)"
+                params.append(logins)
+            if symbols:
+                db_count_query += " AND std_symbol = ANY(%s)"
+                params.append(symbols)
+            
+            db_result = self.db_manager.model_db.execute_query(db_count_query, params)
+            db_count = db_result[0]["count"] if db_result else 0
+            
+            # Determine if this date needs data
+            if api_count < 0:
+                # API error, fall back to checking if we have any data
+                if db_count == 0:
+                    missing_dates.append(current_date)
+                    logger.debug(f"{current_date}: No data in DB (API check failed)")
+            elif api_count == 0:
+                # No trades for this date according to API
+                logger.debug(f"{current_date}: No trades according to API")
+            elif db_count < api_count:
+                # We have fewer trades than API reports
+                missing_dates.append(current_date)
+                logger.debug(f"{current_date}: Partial data - have {db_count}/{api_count} trades")
+            else:
+                # We have all the data
+                logger.debug(f"{current_date}: Complete - have all {db_count} trades")
+            
+            current_date += timedelta(days=1)
         
         # Group consecutive dates into ranges
         if not missing_dates:
@@ -345,6 +364,7 @@ class TradesIngester(BaseIngester):
     ) -> int:
         """
         Fetch closed trades from API and insert into database.
+        Now includes smart checking to avoid fetching already-complete data.
         """
         batch_data = []
         total_records = 0
@@ -356,6 +376,44 @@ class TradesIngester(BaseIngester):
                 current_start + timedelta(days=self.config.date_batch_days - 1),
                 end_date
             )
+            
+            # For single-day ranges, check if we already have all the data
+            if current_start == current_end:
+                # Get count from API
+                date_str = self.api_client.format_date(current_start)
+                api_count = self.api_client.get_trade_count(
+                    trade_type="closed",
+                    trade_date=date_str
+                )
+                
+                if api_count >= 0:  # Valid count returned
+                    # Get count from database
+                    db_count_query = """
+                        SELECT COUNT(*) as count
+                        FROM prop_trading_model.raw_trades_closed
+                        WHERE trade_date = %s
+                    """
+                    db_result = self.db_manager.model_db.execute_query(
+                        db_count_query, [current_start]
+                    )
+                    db_count = db_result[0]["count"] if db_result else 0
+                    
+                    logger.info(
+                        f"Trade count check for {current_start}: "
+                        f"API={api_count}, DB={db_count}"
+                    )
+                    
+                    # If counts match, skip this date
+                    if api_count == db_count and api_count > 0:
+                        logger.info(
+                            f"Skipping {current_start} - already have all {api_count} trades"
+                        )
+                        current_start += timedelta(days=1)
+                        continue
+                    elif db_count > 0 and api_count > db_count:
+                        logger.info(
+                            f"Partial data for {current_start}: have {db_count}/{api_count} trades"
+                        )
             
             logger.info(f"Fetching closed trades for {current_start} to {current_end}")
             
@@ -430,9 +488,43 @@ class TradesIngester(BaseIngester):
     ) -> int:
         """
         Fetch open trades from API and insert into database.
+        Now includes smart checking to avoid fetching already-complete data.
         """
         batch_data = []
         total_records = 0
+        
+        # For single-day ranges, check if we already have all the data
+        if start_date == end_date:
+            # Get count from API
+            date_str = self.api_client.format_date(start_date)
+            api_count = self.api_client.get_trade_count(
+                trade_type="open",
+                trade_date=date_str
+            )
+            
+            if api_count >= 0:  # Valid count returned
+                # Get count from database
+                db_count_query = """
+                    SELECT COUNT(*) as count
+                    FROM prop_trading_model.raw_trades_open
+                    WHERE trade_date = %s
+                """
+                db_result = self.db_manager.model_db.execute_query(
+                    db_count_query, [start_date]
+                )
+                db_count = db_result[0]["count"] if db_result else 0
+                
+                logger.info(
+                    f"Open trade count check for {start_date}: "
+                    f"API={api_count}, DB={db_count}"
+                )
+                
+                # If counts match, skip this date
+                if api_count == db_count and api_count > 0:
+                    logger.info(
+                        f"Skipping {start_date} - already have all {api_count} open trades"
+                    )
+                    return 0
         
         try:
             # Format dates for API
@@ -501,7 +593,7 @@ class TradesIngester(BaseIngester):
             # Build ON CONFLICT clause
             if trade_type == TradeType.CLOSED:
                 conflict_clause = """
-                ON CONFLICT (position, login, platform, broker, trade_date) DO UPDATE SET
+                ON CONFLICT (platform, position, trade_date) DO UPDATE SET
                     manager = EXCLUDED.manager,
                     ticket = EXCLUDED.ticket,
                     account_id = EXCLUDED.account_id,
@@ -528,7 +620,7 @@ class TradesIngester(BaseIngester):
                 """
             else:  # OPEN
                 conflict_clause = """
-                ON CONFLICT (position, login, platform, broker, trade_date) DO UPDATE SET
+                ON CONFLICT (platform, position, trade_date) DO UPDATE SET
                     manager = EXCLUDED.manager,
                     ticket = EXCLUDED.ticket,
                     account_id = EXCLUDED.account_id,
@@ -597,33 +689,63 @@ class TradesIngester(BaseIngester):
                         AND login IS NOT NULL
                         AND platform IS NOT NULL
                         AND broker IS NOT NULL
-                        LIMIT 1
                     """)
                     
-                    if cursor.fetchone()[0] == 0:
+                    total_null_count = cursor.fetchone()[0]
+                    if total_null_count == 0:
                         logger.info("No trades need account_id resolution")
                         return 0
                     
-                    # Use direct UPDATE JOIN for efficiency
-                    logger.info("Performing batch account_id resolution using UPDATE JOIN")
+                    logger.info(f"Found {total_null_count:,} trades needing account_id resolution")
                     
-                    cursor.execute(f"""
-                        UPDATE {table_name} t
-                        SET account_id = m.account_id
-                        FROM prop_trading_model.raw_metrics_alltime m
-                        WHERE t.login = m.login
-                        AND t.platform = m.platform
-                        AND t.broker = m.broker
-                        AND t.account_id IS NULL
-                        AND t.login IS NOT NULL
-                        AND t.platform IS NOT NULL
-                        AND t.broker IS NOT NULL
-                    """)
+                    # Process in batches to avoid statement timeout
+                    batch_size = 100000  # Process 100K rows at a time
+                    total_updated = 0
+                    batch_num = 0
                     
-                    updated_count = cursor.rowcount
-                    conn.commit()
+                    while True:
+                        batch_num += 1
+                        
+                        # Update a batch of rows using CTID for stable row identification
+                        cursor.execute(f"""
+                            UPDATE {table_name} t
+                            SET account_id = m.account_id
+                            FROM prop_trading_model.raw_metrics_alltime m
+                            WHERE t.login = m.login
+                            AND t.platform = m.platform
+                            AND t.broker = m.broker
+                            AND t.account_id IS NULL
+                            AND t.login IS NOT NULL
+                            AND t.platform IS NOT NULL
+                            AND t.broker IS NOT NULL
+                            AND t.ctid IN (
+                                SELECT ctid 
+                                FROM {table_name}
+                                WHERE account_id IS NULL
+                                AND login IS NOT NULL
+                                AND platform IS NOT NULL
+                                AND broker IS NOT NULL
+                                LIMIT {batch_size}
+                            )
+                        """)
                     
-                    logger.info(f"Successfully updated account_id for {updated_count:,} trades")
+                        batch_updated = cursor.rowcount
+                        if batch_updated == 0:
+                            break
+                        
+                        total_updated += batch_updated
+                        conn.commit()
+                        
+                        logger.info(
+                            f"Batch {batch_num}: Updated {batch_updated:,} trades "
+                            f"(total: {total_updated:,})"
+                        )
+                        
+                        # Small delay to prevent overwhelming the database
+                        if batch_updated == batch_size:
+                            time.sleep(0.1)
+                    
+                    logger.info(f"Successfully updated account_id for {total_updated:,} trades total")
                     
                     # Check for any remaining trades without account_id
                     cursor.execute(f"""
@@ -642,7 +764,7 @@ class TradesIngester(BaseIngester):
                             f"without matching account_id in raw_metrics_alltime"
                         )
                     
-                    return updated_count
+                    return total_updated
                     
         except Exception as e:
             logger.error(f"Failed to batch resolve account IDs: {str(e)}")
@@ -918,33 +1040,61 @@ class TradesIngester(BaseIngester):
         logins: Optional[List[str]],
         symbols: Optional[List[str]],
     ) -> List[date]:
-        """Return individual dates between start_date and end_date for which we have no open-trade snapshot."""
-        conditions = ["trade_date BETWEEN %s AND %s"]
-        params: List[Any] = [start_date, end_date]
-
-        if logins:
-            conditions.append("login = ANY(%s)")
-            params.append(logins)
-        if symbols:
-            conditions.append("std_symbol = ANY(%s)")
-            params.append(symbols)
-
-        where_clause = " AND ".join(conditions)
-
-        query = f"""
-            SELECT gs.date
-            FROM generate_series(%s::date, %s::date, '1 day') AS gs(date)
-            WHERE NOT EXISTS (
-                SELECT 1
-                FROM prop_trading_model.raw_trades_open ro
-                WHERE ro.trade_date = gs.date
-                  AND {where_clause}
-            )
-            ORDER BY gs.date
         """
-
-        results = self.db_manager.model_db.execute_query(query, [start_date, end_date] + params)
-        return [row["date"] for row in results]
+        Return individual dates between start_date and end_date for which we have incomplete open-trade snapshot.
+        Enhanced with API count checking to detect partial data.
+        """
+        missing_dates = []
+        
+        # Check each day in the range
+        current_date = start_date
+        while current_date <= end_date:
+            # First, check API count
+            date_str = self.api_client.format_date(current_date)
+            api_count = self.api_client.get_trade_count(
+                trade_type="open",
+                trade_date=date_str
+            )
+            
+            # Get database count
+            db_count_query = """
+                SELECT COUNT(*) as count
+                FROM prop_trading_model.raw_trades_open
+                WHERE trade_date = %s
+            """
+            
+            # Add filters if specified
+            params = [current_date]
+            if logins:
+                db_count_query += " AND login = ANY(%s)"
+                params.append(logins)
+            if symbols:
+                db_count_query += " AND std_symbol = ANY(%s)"
+                params.append(symbols)
+            
+            db_result = self.db_manager.model_db.execute_query(db_count_query, params)
+            db_count = db_result[0]["count"] if db_result else 0
+            
+            # Determine if this date needs data
+            if api_count < 0:
+                # API error, fall back to checking if we have any data
+                if db_count == 0:
+                    missing_dates.append(current_date)
+                    logger.debug(f"{current_date}: No open trades in DB (API check failed)")
+            elif api_count == 0:
+                # No trades for this date according to API
+                logger.debug(f"{current_date}: No open trades according to API")
+            elif db_count < api_count:
+                # We have fewer trades than API reports
+                missing_dates.append(current_date)
+                logger.debug(f"{current_date}: Partial open trades - have {db_count}/{api_count}")
+            else:
+                # We have all the data
+                logger.debug(f"{current_date}: Complete - have all {db_count} open trades")
+            
+            current_date += timedelta(days=1)
+        
+        return missing_dates
 
 
 def main():

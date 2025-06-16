@@ -4,13 +4,12 @@ Provides all functionality required by the data pipeline modules.
 """
 import os
 import logging
-from typing import Optional, Any, Dict, List, Tuple
+from typing import Optional, Any, Dict, List
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-import psycopg2
 from psycopg2.extras import RealDictCursor, execute_batch
-from sqlalchemy import create_engine, text, MetaData
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
 import pandas as pd
 from dotenv import load_dotenv

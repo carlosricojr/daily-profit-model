@@ -393,6 +393,10 @@ class TestDataStructureFieldValidation:
                 'alltime_batch_size', 'api_rate_limit_delay', 'daily_lookback_days', 
                 'data_quality_check', 'get_data_quality_issues', 'hourly_lookback_days', 
                 'is_integer', 'latest_date', 'latest_hour', 'max_missing_slots',
+                # API client methods
+                'get_trade_count',
+                # Database column names (transform targets)
+                'platform',
                 # DataFrame operations
                 'DataFrame', 'read_csv', 'to_dict', 'iloc', 'columns',
                 'index', 'values', 'shape', 'dtype', 'isna', 'notna',

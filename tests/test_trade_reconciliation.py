@@ -1,6 +1,5 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from datetime import date
 
 # Import the module after patching get_db_manager so the class picks up the stub
 

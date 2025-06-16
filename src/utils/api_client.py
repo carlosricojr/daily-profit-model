@@ -753,36 +753,6 @@ class RiskAnalyticsAPIClient:
             f"Pagination complete. Fetched {total_fetched} records in {page} pages"
         )
 
-    def get_accounts(
-        self,
-        logins: Optional[List[str]] = None,
-        traders: Optional[List[str]] = None,
-        **kwargs,
-    ) -> Iterator[List[Dict[str, Any]]]:
-        """
-        Get accounts data with pagination.
-
-        Args:
-            logins: List of login IDs to filter
-            traders: List of trader IDs to filter
-            **kwargs: Additional parameters
-
-        Yields:
-            Lists of account records
-        """
-        params = {}
-        if logins:
-            params["logins"] = ",".join(logins)
-        if traders:
-            params["traders"] = ",".join(traders)
-        params.update(kwargs)
-
-        # Max limit for accounts endpoint is 500
-        # Accounts endpoint doesn't support include-total
-        yield from self.paginate(
-            "accounts", params=params, limit=500, include_total=False
-        )
-
     def get_metrics(
         self,
         metric_type: str,
@@ -900,6 +870,81 @@ class RiskAnalyticsAPIClient:
         yield from self.paginate(
             endpoint, params=params, limit=1000, include_total=True
         )
+
+    def get_trade_count(
+        self,
+        trade_type: str,
+        trade_date: Optional[str] = None,
+        open_time_from: Optional[str] = None,
+        open_time_to: Optional[str] = None,
+        close_time_from: Optional[str] = None,
+        close_time_to: Optional[str] = None,
+        **kwargs,
+    ) -> int:
+        """
+        Get total count of trades for a date without fetching all data.
+        
+        This method is optimized to just get the count by fetching only 1 record
+        with include-total=1 to get the total count from the API.
+
+        Args:
+            trade_type: Type of trades ('closed' or 'open')
+            trade_date: Trade date in YYYYMMDD format
+            open_time_from/to: Open time range in YYYYMMDD format
+            close_time_from/to: Close time range in YYYYMMDD format (closed trades only)
+            **kwargs: Additional parameters
+
+        Returns:
+            Total count of trades matching the criteria
+        """
+        endpoint = f"v2/trades/{trade_type}"
+        params = {
+            "limit": 1,  # Only fetch 1 record
+            "include-total": 1,  # Request total count
+        }
+
+        # Date filters
+        if trade_date:
+            params["trade-date"] = trade_date
+        if open_time_from:
+            params["open-time-from"] = open_time_from
+        if open_time_to:
+            params["open-time-to"] = open_time_to
+        if close_time_from and trade_type == "closed":
+            params["close-time-from"] = close_time_from
+        if close_time_to and trade_type == "closed":
+            params["close-time-to"] = close_time_to
+
+        params.update(kwargs)
+
+        try:
+            # Make single request to get count
+            response = self._make_request(endpoint, params=params)
+            
+            # Validate response
+            self._validate_response(response)
+            
+            # For trades endpoints with include-total=1, the structure is:
+            # response.Data.total (according to the API docs)
+            total = 0
+            if isinstance(response, dict) and "Data" in response:
+                data_field = response["Data"]
+                if isinstance(data_field, dict) and "total" in data_field:
+                    total = data_field["total"]
+                    logger.info(f"API trade count for {trade_type} trades on {trade_date}: {total}")
+                else:
+                    logger.warning("No total field found in response.Data for trades")
+                    return -1
+            else:
+                logger.warning("Unexpected response structure for trade count")
+                return -1
+            
+            return total
+            
+        except Exception as e:
+            logger.error(f"Failed to get trade count: {str(e)}")
+            # Return -1 to indicate error, which will trigger normal fetch
+            return -1
 
     def format_date(self, date: datetime) -> str:
         """Format date for API in YYYYMMDD format."""

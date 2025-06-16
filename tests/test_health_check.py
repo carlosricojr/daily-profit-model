@@ -3,7 +3,7 @@
 
 import sys
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Add src to path
 sys.path.append('src')
@@ -57,7 +57,7 @@ def test_airflow_postgres_hook():
                 hours_old = (datetime.now() - last_update).total_seconds() / 3600
                 print(f" Data freshness: Last update was {hours_old:.1f} hours ago")
                 if hours_old > 25:
-                    print(f" Warning: Data may be stale (>25 hours old)")
+                    print(" Warning: Data may be stale (>25 hours old)")
             else:
                 print(" No recent data found in raw_metrics_daily")
                 assert False, "Data freshness: no recent data"
@@ -109,7 +109,7 @@ def test_database_manager():
                 hours_old = (datetime.now() - last_update).total_seconds() / 3600
                 print(f" Data freshness: Last update was {hours_old:.1f} hours ago")
                 if hours_old > 25:
-                    print(f" Warning: Data may be stale (>25 hours old)")
+                    print(" Warning: Data may be stale (>25 hours old)")
             else:
                 print(" No recent data found in raw_metrics_daily")
                 assert False, "Data freshness: no recent data"
@@ -134,7 +134,6 @@ def test_database_manager():
                 row = result[0]
                 model_version = row['model_version']
                 model_path = row['model_path']
-                is_active = row['is_active']
                 created_at = row['created_at']
                 
                 days_old = (datetime.now() - created_at).days
@@ -143,7 +142,7 @@ def test_database_manager():
                 print(f"  Created: {created_at} ({days_old} days ago)")
                 
                 if days_old > 30:
-                    print(f" Warning: Model is older than 30 days")
+                    print(" Warning: Model is older than 30 days")
                     
                 if os.path.exists(model_path):
                     print(f" Model file exists at {model_path}")
@@ -170,15 +169,27 @@ def main():
     # Check environment
     conn_string = os.environ.get('DB_CONNECTION_STRING_SESSION_POOLER')
     if conn_string:
-        print(f"DB_CONNECTION_STRING_SESSION_POOLER is set")
+        print("DB_CONNECTION_STRING_SESSION_POOLER is set")
     else:
         print("DB_CONNECTION_STRING_SESSION_POOLER not found")
         print("Please run with: uv run --env-file .env python test_health_check.py")
         return
     
     # Run tests
-    test_airflow_postgres_hook()
-    test_database_manager()
+    airflow_success = False
+    db_manager_success = False
+    
+    try:
+        test_airflow_postgres_hook()
+        airflow_success = True
+    except:
+        pass
+        
+    try:
+        test_database_manager()
+        db_manager_success = True
+    except:
+        pass
     
     print("\n\n=== Summary ===")
     print(f"Airflow PostgresHook: {'PASSED' if airflow_success else 'FAILED'}")

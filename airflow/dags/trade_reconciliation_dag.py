@@ -11,7 +11,6 @@ This DAG implements the complete trade reconciliation process as specified:
 Runs at 23:00 America/New_York by default (cron: ``0 23 * * *``)
 """
 
-import os
 from datetime import datetime, timedelta
 
 from airflow import DAG

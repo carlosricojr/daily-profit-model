@@ -290,13 +290,22 @@ class TestOptimizedHourlyIngestion(TestMetricsIngester):
         
         # Mock API response
         api_records = [
-            {"accountId": "123456", "date": "20240101", "hour": 11, "netProfit": 100},
-            {"accountId": "789012", "date": "20240102", "hour": 0, "netProfit": 50}
+            {"accountId": "123456", "login": 123456, "mt_version": "MT4", "broker": "TestBroker", "date": "20240101", "hour": 11, "netProfit": 100},
+            {"accountId": "789012", "login": 789012, "mt_version": "MT5", "broker": "TestBroker", "date": "20240102", "hour": 0, "netProfit": 50}
         ]
         self.mock_api_client.get_metrics.return_value = iter([api_records])
         
         # Mock transform and insert
-        self.ingester._transform_hourly_metric = Mock(side_effect=lambda x: {"transformed": True, **x})
+        def mock_transform(x):
+            return {
+                "transformed": True,
+                "account_id": x.get("accountId"),
+                "login": x.get("login"),
+                "platform": x.get("mt_version"),
+                "broker": x.get("broker"),
+                **x
+            }
+        self.ingester._transform_hourly_metric = Mock(side_effect=mock_transform)
         self.ingester._insert_batch_with_upsert = Mock(return_value=2)
         
         # Execute
@@ -716,16 +725,25 @@ class TestAPIInteraction(TestMetricsIngester):
         """Test daily ingestion for specific dates."""
         dates = [date(2024, 1, 1), date(2024, 1, 2)]
         
-        # Mock API response
-        api_records = [
-            {"date": "20240101", "accountId": "123456", "netProfit": 100},
-            {"date": "20240102", "accountId": "123456", "netProfit": 150}
+        # Mock API response - one call per date
+        api_responses = [
+            iter([[{"date": "20240101", "accountId": "123456", "login": 123456, "mt_version": "MT4", "broker": "TestBroker", "netProfit": 100}]]),
+            iter([[{"date": "20240102", "accountId": "123456", "login": 123456, "mt_version": "MT4", "broker": "TestBroker", "netProfit": 150}]])
         ]
-        self.mock_api_client.get_metrics.return_value = iter([api_records])
+        self.mock_api_client.get_metrics.side_effect = api_responses
         
         # Mock transform and insert
-        self.ingester._transform_daily_metric = Mock(side_effect=lambda x: {"transformed": True, **x})
-        self.ingester._insert_batch_with_upsert = Mock(return_value=2)
+        def mock_transform(x):
+            return {
+                "transformed": True,
+                "account_id": x.get("accountId"),
+                "login": x.get("login"),
+                "platform": x.get("mt_version"),
+                "broker": x.get("broker"),
+                **x
+            }
+        self.ingester._transform_daily_metric = Mock(side_effect=mock_transform)
+        self.ingester._insert_batch_with_upsert = Mock(return_value=1)
         
         # Execute
         result = self.ingester._ingest_daily_for_dates(dates)
@@ -743,16 +761,28 @@ class TestAPIInteraction(TestMetricsIngester):
             ("123456", date(2024, 1, 2))
         ]
         
-        # Mock API response
-        api_records = [
-            {"date": "20240101", "accountId": "123456", "netProfit": 100},
-            {"date": "20240101", "accountId": "789012", "netProfit": 200}
+        # Mock API response - one call per date
+        api_responses = [
+            iter([[
+                {"date": "20240101", "accountId": "123456", "login": 123456, "mt_version": "MT4", "broker": "TestBroker", "netProfit": 100},
+                {"date": "20240101", "accountId": "789012", "login": 789012, "mt_version": "MT5", "broker": "TestBroker", "netProfit": 200}
+            ]]),
+            iter([[{"date": "20240102", "accountId": "123456", "login": 123456, "mt_version": "MT4", "broker": "TestBroker", "netProfit": 150}]])
         ]
-        self.mock_api_client.get_metrics.return_value = iter([api_records])
+        self.mock_api_client.get_metrics.side_effect = api_responses
         
         # Mock transform and insert
-        self.ingester._transform_daily_metric = Mock(side_effect=lambda x: {"transformed": True, **x})
-        self.ingester._insert_batch_with_upsert = Mock(return_value=2)
+        def mock_transform(x):
+            return {
+                "transformed": True,
+                "account_id": x.get("accountId"),
+                "login": x.get("login"),
+                "platform": x.get("mt_version"),
+                "broker": x.get("broker"),
+                **x
+            }
+        self.ingester._transform_daily_metric = Mock(side_effect=mock_transform)
+        self.ingester._insert_batch_with_upsert = Mock(side_effect=[2, 1])  # 2 records for first date, 1 for second
         
         # Execute
         result = self.ingester._ingest_daily_for_missing(missing_data)

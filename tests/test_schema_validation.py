@@ -268,7 +268,7 @@ class SchemaValidator:
         
         # Tables that should have audit columns
         audit_tables = [
-            'raw_accounts_data', 'raw_metrics_alltime', 'raw_metrics_daily',
+            'raw_metrics_alltime', 'raw_metrics_daily',
             'raw_metrics_hourly', 'raw_trades_closed', 'raw_trades_open',
             'raw_plans_data', 'raw_regimes_daily'
         ]

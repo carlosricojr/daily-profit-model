@@ -3,7 +3,6 @@ Simple wrapper for PostgreSQL dynamic partitioning functions.
 Replaces complex partition_migration_manager.py with database-native approach.
 """
 import os
-from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from sqlalchemy import create_engine, text
 import logging
@@ -128,7 +127,7 @@ class DynamicPartitionManager:
                 date_column = 'trade_date' if table_name in ['raw_trades_closed', 'raw_trades_open'] else 'date'
                 
                 # Get partition info
-                result = conn.execute(text(f"""
+                result = conn.execute(text("""
                     SELECT 
                         COUNT(*) as total_partitions,
                         COUNT(*) FILTER (WHERE pg_relation_size(
@@ -239,7 +238,7 @@ if __name__ == "__main__":
         
         # Analyze if partitioning is needed
         analysis = pm.analyze_table_for_partitioning(table)
-        print(f"\nPartitioning Analysis:")
+        print("\nPartitioning Analysis:")
         print(f"  Already partitioned: {analysis.get('is_already_partitioned', False)}")
         print(f"  Needs partitioning: {analysis.get('needs_partitioning', False)}")
         print(f"  Row count: {analysis.get('row_count', 0):,}")
@@ -249,7 +248,7 @@ if __name__ == "__main__":
         # Get partition summary
         summary = pm.get_partition_summary(table)
         if 'error' not in summary:
-            print(f"\nCurrent Partition Status:")
+            print("\nCurrent Partition Status:")
             print(f"  Total partitions: {summary['partitions']['total']}")
             print(f"  Empty partitions: {summary['partitions']['empty']}")
             print(f"  Partition range: {summary['partitions']['oldest']} to {summary['partitions']['newest']}")
@@ -262,7 +261,7 @@ if __name__ == "__main__":
         # Analyze cleanup opportunities
         cleanup_analysis = pm.analyze_partition_cleanup(table)
         if cleanup_analysis:
-            print(f"\nPartition Cleanup Analysis:")
+            print("\nPartition Cleanup Analysis:")
             keep_count = sum(1 for item in cleanup_analysis if item['action'] == 'KEEP')
             drop_count = sum(1 for item in cleanup_analysis if item['action'] == 'DROP')
             print(f"  Partitions to keep: {keep_count}")
@@ -289,7 +288,7 @@ if __name__ == "__main__":
     # Analyze conversion requirements for raw_metrics_hourly
     conversion_analysis = pm.analyze_table_conversion("raw_metrics_hourly")
     if 'error' not in conversion_analysis:
-        print(f"\nConversion Analysis for raw_metrics_hourly:")
+        print("\nConversion Analysis for raw_metrics_hourly:")
         print(f"  Row count: {conversion_analysis.get('row_count', 0):,}")
         print(f"  Table size: {conversion_analysis.get('table_size', 'N/A')}")
         print(f"  Date range: {conversion_analysis['date_range']['min']} to {conversion_analysis['date_range']['max']}")

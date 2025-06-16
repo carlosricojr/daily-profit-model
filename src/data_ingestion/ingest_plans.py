@@ -11,7 +11,6 @@ from pathlib import Path
 import hashlib
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
 from threading import Lock as _ThreadLock
 from tempfile import mkdtemp as _make_tempdir
 

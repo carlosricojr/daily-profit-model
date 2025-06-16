@@ -18,8 +18,26 @@ class TestIntegrationPipeline(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Set up test environment."""
+        # Save original environment variables
+        cls.original_api_key = os.environ.get("RISK_API_KEY")
+        cls.original_base_url = os.environ.get("RISK_API_BASE_URL")
+        
         os.environ["RISK_API_KEY"] = "test-api-key"
         os.environ["RISK_API_BASE_URL"] = "https://test-api.example.com"
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Clean up test environment."""
+        # Restore original environment variables
+        if cls.original_api_key is not None:
+            os.environ["RISK_API_KEY"] = cls.original_api_key
+        else:
+            os.environ.pop("RISK_API_KEY", None)
+            
+        if cls.original_base_url is not None:
+            os.environ["RISK_API_BASE_URL"] = cls.original_base_url
+        else:
+            os.environ.pop("RISK_API_BASE_URL", None)
 
     def setUp(self):
         """Set up before each test."""

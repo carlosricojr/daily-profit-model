@@ -19,6 +19,11 @@ class StagingSnapshotsCreator:
     def __init__(self):
         self.db_manager = get_db_manager()
         self.staging_table = "stg_accounts_daily_snapshots"
+        self.raw_metrics_alltime_table = "raw_metrics_alltime"
+        self.raw_metrics_daily_table = "raw_metrics_daily"
+        self.raw_metrics_hourly_table = "raw_metrics_hourly"
+        self.raw_plans_data_table = "raw_plans_data"
+        self.raw_regimes_daily_table = "raw_regimes_daily"
         
     def create_snapshots(
         self,
@@ -46,8 +51,8 @@ class StagingSnapshotsCreator:
             if not end_date:
                 end_date = datetime.now().date() - timedelta(days=1)
             if not start_date:
-                # Default to last 30 days
-                start_date = end_date - timedelta(days=30)
+                # Default to January 1st 2024
+                start_date = date(2024, 1, 1)
 
             logger.info(f"Creating snapshots from {start_date} to {end_date}")
 
@@ -92,14 +97,54 @@ class StagingSnapshotsCreator:
             raise
 
     def _snapshots_exist_for_date(self, check_date: date) -> bool:
-        """Check if snapshots already exist for a given date."""
-        query = f"""
-        SELECT COUNT(*) as count 
-        FROM {self.staging_table} 
-        WHERE snapshot_date = %(check_date)s
+        """Return True if each account_id has exactly *one* row in both
+        `raw_metrics_daily` (for the given date) and `stg_accounts_daily_snapshots`
+        (for the same date), and the set of account_ids matches between the two
+        tables.  Otherwise return False.
+
+        This guarantees a 1-to-1 correspondence between the source metrics and
+        the already-materialised snapshots; if anything is missing or
+        duplicated we must rebuild the snapshots for that day.
         """
-        result = self.db_manager.model_db.execute_query(query, {"check_date": check_date})
-        return result[0]["count"] > 0
+
+        validation_query = f"""
+        WITH
+            -- Raw metrics counts per account for the date
+            raw_counts AS (
+                SELECT account_id, COUNT(*)        AS cnt
+                FROM {self.raw_metrics_daily_table}
+                WHERE date = %(check_date)s
+                GROUP BY account_id
+            ),
+            -- Snapshot counts per account for the same date
+            stg_counts AS (
+                SELECT account_id, COUNT(*)        AS cnt
+                FROM {self.staging_table}
+                WHERE snapshot_date = %(check_date)s
+                GROUP BY account_id
+            ),
+            -- Problem #1: duplicates (cnt <> 1) in either table
+            dupes AS (
+                SELECT account_id FROM raw_counts WHERE cnt <> 1
+                UNION
+                SELECT account_id FROM stg_counts WHERE cnt <> 1
+            ),
+            -- Problem #2: account_ids present in one table but not the other
+            mismatched AS (
+                SELECT rc.account_id
+                FROM raw_counts rc
+                FULL OUTER JOIN stg_counts sc USING (account_id)
+                WHERE rc.account_id IS NULL OR sc.account_id IS NULL
+            )
+        SELECT (
+            NOT EXISTS (SELECT 1 FROM dupes)       -- no duplicates
+            AND NOT EXISTS (SELECT 1 FROM mismatched) -- same account set
+            AND EXISTS (SELECT 1 FROM raw_counts)  -- at least one account present
+        ) AS is_consistent
+        """
+
+        result = self.db_manager.model_db.execute_query(validation_query, {"check_date": check_date})
+        return bool(result and result[0]["is_consistent"])
 
     def _create_snapshots_for_date(self, snapshot_date: date) -> int:
         """Create snapshots for a specific date."""
