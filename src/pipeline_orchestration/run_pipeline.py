@@ -32,7 +32,7 @@ class PipelineOrchestrator:
         self.db_manager = get_db_manager()
         self.src_dir = Path(__file__).parent.parent
 
-        # Pipeline stages configuration
+        # Pipeline stages configuration\
         self.stages = {
             "testing": {
                 "name": "Test Codebase and Database",
@@ -343,7 +343,6 @@ class PipelineOrchestrator:
                     str(start_date),
                     "--end-date",
                     str(end_date) if end_date else str(date.today() - timedelta(days=1)),
-                    "--clean-data",
                     "--log-level",
                     "INFO",
                 ],

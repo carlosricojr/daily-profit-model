@@ -935,24 +935,6 @@ class RawTradesOpen(Base):
     source_api_endpoint: Mapped[Optional[str]] = mapped_column(String(500))
 
 
-class ScheduledJobs(Base):
-    __tablename__ = 'scheduled_jobs'
-    __table_args__ = (
-        PrimaryKeyConstraint('job_name', name='scheduled_jobs_pkey'),
-        {'schema': 'prop_trading_model'}
-    )
-
-    job_name: Mapped[str] = mapped_column(String(100), primary_key=True)
-    schedule: Mapped[str] = mapped_column(String(100))
-    last_run: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
-    next_run: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
-    status: Mapped[Optional[str]] = mapped_column(String(50))
-    error_count: Mapped[Optional[int]] = mapped_column(Integer, server_default=text('0'))
-    command: Mapped[Optional[str]] = mapped_column(Text)
-    created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
-    updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
-
-
 class SchemaMigrations(Base):
     __tablename__ = 'schema_migrations'
     __table_args__ = (

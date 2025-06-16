@@ -44,7 +44,6 @@ def get_non_partition_tables() -> List[str]:
         "raw_trades_open",
         
         # System tables
-        "scheduled_jobs",
         "schema_migrations",
         "schema_version",
         

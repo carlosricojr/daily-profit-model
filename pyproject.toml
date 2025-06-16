@@ -3,7 +3,7 @@ name = "daily-profit-model"
 version = "0.1.0"
 description = "A predictive model to score trading accounts based on the likelihood and magnitude of making profits, aiding in hedging decisions."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 authors = [
     { name = "Carlos Rico-Ospina", email = "carlosricojr@gmail.com" }
 ]

@@ -89,17 +89,24 @@ class DatabaseConnection:
         with self.get_connection() as conn:
             return pd.read_sql_query(query, conn, params=params)
     
-    def execute_command(self, query: str, params: Optional[Dict[str, Any]] = None) -> int:
+    def execute_command(self, query: str, params: Optional[Dict[str, Any]] = None, 
+                      timeout_seconds: Optional[int] = None) -> int:
         """Execute an INSERT/UPDATE/DELETE command and return affected rows."""
         with self.get_connection() as conn:
             with conn.cursor() as cur:
+                if timeout_seconds:
+                    # Set custom timeout for this query
+                    timeout_ms = timeout_seconds * 1000
+                    cur.execute(f"SET LOCAL statement_timeout = {timeout_ms}")
+                    logger.info(f"Set statement_timeout to {timeout_seconds}s ({timeout_ms}ms) for query")
                 cur.execute(query, params)
                 return cur.rowcount
     
     # Alias used by some higher-level modules/tests
-    def execute_update(self, query: str, params: Optional[Dict[str, Any]] = None) -> int:  # noqa: N802
+    def execute_update(self, query: str, params: Optional[Dict[str, Any]] = None, 
+                      timeout_seconds: Optional[int] = None) -> int:  # noqa: N802
         """Alias for execute_command for backward-/cross-module compatibility."""
-        return self.execute_command(query, params)
+        return self.execute_command(query, params, timeout_seconds)
     
     def insert_batch(self, table: str, data: List[Dict[str, Any]], 
                     returning: Optional[str] = None) -> Optional[List[Any]]:

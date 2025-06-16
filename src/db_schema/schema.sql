@@ -1254,19 +1254,6 @@ CREATE TABLE query_performance_log (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Scheduled jobs tracking
-CREATE TABLE scheduled_jobs (
-    job_name VARCHAR(100) PRIMARY KEY,
-    schedule VARCHAR(100) NOT NULL,
-    last_run TIMESTAMP,
-    next_run TIMESTAMP,
-    status VARCHAR(50),
-    error_count INTEGER DEFAULT 0,
-    command TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 -- ========================================
 -- Materialized Views
 -- ========================================
