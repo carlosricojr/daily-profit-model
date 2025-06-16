@@ -56,17 +56,44 @@ class StagingSnapshotsCreator:
 
             logger.info(f"Creating snapshots from {start_date} to {end_date}")
 
-            # Process each date
+            # Collect all dates that need (re)building first
+            dates_to_process = []
             current_date = start_date
             while current_date <= end_date:
                 if force_rebuild or not self._snapshots_exist_for_date(current_date):
-                    date_records = self._create_snapshots_for_date(current_date)
-                    total_records += date_records
-                    logger.info(f"Created {date_records} snapshots for {current_date}")
-                else:
-                    logger.info(f"Snapshots already exist for {current_date}, skipping")
-
+                    dates_to_process.append(current_date)
                 current_date += timedelta(days=1)
+
+            if not dates_to_process:
+                logger.info("No snapshots required – everything up-to-date.")
+            else:
+                # Run snapshot builds concurrently – simple thread pool using the
+                # existing connection pool (thread-safe via SQLAlchemy).
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                max_workers = min(4, len(dates_to_process))  # keep it lightweight
+                logger.info(
+                    f"Building snapshots for {len(dates_to_process)} day(s) "
+                    f"using {max_workers} worker(s)…"
+                )
+
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_map = {
+                        executor.submit(self._create_snapshots_for_date, d): d
+                        for d in dates_to_process
+                    }
+
+                    for future in as_completed(future_map):
+                        date = future_map[future]
+                        try:
+                            date_records = future.result()
+                            total_records += date_records
+                            logger.info(
+                                f"Created {date_records} snapshots for {date}"
+                            )
+                        except Exception as exc:
+                            logger.error(f"Snapshot creation failed for {date}: {exc}")
+                            raise
 
             # Log successful completion
             self.db_manager.log_pipeline_execution(
@@ -148,11 +175,7 @@ class StagingSnapshotsCreator:
 
     def _create_snapshots_for_date(self, snapshot_date: date) -> int:
         """Create snapshots for a specific date."""
-        # Delete existing snapshots for this date if any
-        delete_query = f"DELETE FROM {self.staging_table} WHERE snapshot_date = %(snapshot_date)s"
-        self.db_manager.model_db.execute_command(delete_query, {"snapshot_date": snapshot_date})
-
-        # Simplified insert query using only raw_metrics_daily and raw_plans_data
+        # Upsert using INSERT … ON CONFLICT to avoid a delete-then-insert round trip
         insert_query = f"""
         INSERT INTO {self.staging_table} (
             account_id, login, snapshot_date, trader_id, plan_id, phase, status,
@@ -268,6 +291,33 @@ class StagingSnapshotsCreator:
             COALESCE(pi.enable_consistency, FALSE) as enable_consistency
         FROM account_metrics am
         LEFT JOIN plan_info pi ON am.plan_id = pi.plan_id
+
+        ON CONFLICT (account_id, snapshot_date) DO UPDATE SET
+            login                       = EXCLUDED.login,
+            trader_id                   = EXCLUDED.trader_id,
+            plan_id                     = EXCLUDED.plan_id,
+            phase                       = EXCLUDED.phase,
+            status                      = EXCLUDED.status,
+            starting_balance            = EXCLUDED.starting_balance,
+            balance                     = EXCLUDED.balance,
+            equity                      = EXCLUDED.equity,
+            profit_target               = EXCLUDED.profit_target,
+            profit_target_pct           = EXCLUDED.profit_target_pct,
+            max_daily_drawdown          = EXCLUDED.max_daily_drawdown,
+            max_daily_drawdown_pct      = EXCLUDED.max_daily_drawdown_pct,
+            max_drawdown                = EXCLUDED.max_drawdown,
+            max_drawdown_pct            = EXCLUDED.max_drawdown_pct,
+            max_leverage                = EXCLUDED.max_leverage,
+            is_drawdown_relative        = EXCLUDED.is_drawdown_relative,
+            days_active                 = EXCLUDED.days_active,
+            days_since_last_trade       = EXCLUDED.days_since_last_trade,
+            distance_to_profit_target   = EXCLUDED.distance_to_profit_target,
+            distance_to_max_drawdown    = EXCLUDED.distance_to_max_drawdown,
+            liquidate_friday            = EXCLUDED.liquidate_friday,
+            inactivity_period           = EXCLUDED.inactivity_period,
+            daily_drawdown_by_balance_equity = EXCLUDED.daily_drawdown_by_balance_equity,
+            enable_consistency          = EXCLUDED.enable_consistency,
+            updated_at                  = NOW()
         """
         
         params = {"snapshot_date": snapshot_date}

@@ -957,12 +957,37 @@ CREATE TABLE stg_accounts_daily_snapshots (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (account_id, snapshot_date)
-);
+) PARTITION BY RANGE (snapshot_date);
 
--- Indexes for staging table
+-- Indexes for staging table (parent)
 CREATE INDEX idx_stg_accounts_daily_account_date ON stg_accounts_daily_snapshots(account_id, snapshot_date DESC);
 CREATE INDEX idx_stg_accounts_daily_date ON stg_accounts_daily_snapshots(snapshot_date DESC);
 CREATE INDEX idx_stg_accounts_daily_status ON stg_accounts_daily_snapshots(status) WHERE status = 1;
+
+-- Create partitions for stg_accounts_daily_snapshots (last 3 years + future)
+DO $$
+DECLARE
+    start_date date := '2022-01-01';
+    partition_date date;
+    partition_name text;
+BEGIN
+    FOR partition_date IN 
+        SELECT generate_series(
+            start_date,
+            CURRENT_DATE + interval '3 months',
+            interval '1 month'
+        )::date
+    LOOP
+        partition_name := 'stg_accounts_daily_snapshots_' || to_char(partition_date, 'YYYY_MM');
+        EXECUTE format('
+            CREATE TABLE IF NOT EXISTS prop_trading_model.%I PARTITION OF prop_trading_model.stg_accounts_daily_snapshots
+            FOR VALUES FROM (%L) TO (%L)',
+            partition_name,
+            partition_date,
+            partition_date + interval '1 month'
+        );
+    END LOOP;
+END $$;
 
 -- ========================================
 -- Feature Store (ML Layer)
