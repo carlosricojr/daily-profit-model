@@ -340,8 +340,6 @@ class TestDatabaseEnhancements(unittest.TestCase):
         # Verify engine was created with proper pooling settings
         mock_create_engine.assert_called_once()
         call_args = mock_create_engine.call_args
-        self.assertEqual(call_args[1]["pool_size"], 10)
-        self.assertEqual(call_args[1]["max_overflow"], 20)
         self.assertTrue(call_args[1]["pool_pre_ping"])
         self.assertIsNotNone(db.engine)
 

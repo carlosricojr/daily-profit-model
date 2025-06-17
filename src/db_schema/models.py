@@ -969,52 +969,6 @@ class SchemaVersion(Base):
     status: Mapped[Optional[str]] = mapped_column(String(20), server_default=text("'applied'::character varying"))
 
 
-class StgAccountsDailySnapshots(Base):
-    __tablename__ = 'stg_accounts_daily_snapshots'
-    __table_args__ = (
-        CheckConstraint('phase = ANY (ARRAY[1, 2, 3, 4])', name='stg_accounts_daily_snapshots_phase_check'),
-        CheckConstraint('status = ANY (ARRAY[1, 2, 3])', name='stg_accounts_daily_snapshots_status_check'),
-        PrimaryKeyConstraint('account_id', 'snapshot_date', name='stg_accounts_daily_snapshots_pkey'),
-        Index('idx_stg_accounts_daily_account_date', 'account_id', 'snapshot_date'),
-        Index('idx_stg_accounts_daily_date', 'snapshot_date'),
-        Index('idx_stg_accounts_daily_status', 'status'),
-        {'schema': 'prop_trading_model'}
-    )
-
-    account_id: Mapped[str] = mapped_column(String(255), primary_key=True)
-    snapshot_date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
-    login: Mapped[str] = mapped_column(String(255))
-    plan_id: Mapped[Optional[str]] = mapped_column(String(255))
-    trader_id: Mapped[Optional[str]] = mapped_column(String(255))
-    status: Mapped[Optional[int]] = mapped_column(Integer)
-    type: Mapped[Optional[int]] = mapped_column(Integer)
-    phase: Mapped[Optional[int]] = mapped_column(Integer)
-    broker: Mapped[Optional[int]] = mapped_column(Integer)
-    platform: Mapped[Optional[int]] = mapped_column(Integer)
-    country: Mapped[Optional[str]] = mapped_column(String(2))
-    starting_balance: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
-    balance: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
-    equity: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
-    profit_target: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
-    profit_target_pct: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
-    max_daily_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
-    max_daily_drawdown_pct: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
-    max_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
-    max_drawdown_pct: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(5, 2))
-    max_leverage: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(10, 2))
-    is_drawdown_relative: Mapped[Optional[bool]] = mapped_column(Boolean)
-    distance_to_profit_target: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
-    distance_to_max_drawdown: Mapped[Optional[decimal.Decimal]] = mapped_column(Numeric(18, 2))
-    liquidate_friday: Mapped[Optional[bool]] = mapped_column(Boolean, server_default=text('false'))
-    inactivity_period: Mapped[Optional[int]] = mapped_column(Integer)
-    daily_drawdown_by_balance_equity: Mapped[Optional[bool]] = mapped_column(Boolean, server_default=text('false'))
-    enable_consistency: Mapped[Optional[bool]] = mapped_column(Boolean, server_default=text('false'))
-    days_active: Mapped[Optional[int]] = mapped_column(Integer)
-    days_since_last_trade: Mapped[Optional[int]] = mapped_column(Integer)
-    created_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
-    updated_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
-
-
 class TradeRecon(Base):
     """ORM mapping for prop_trading_model.trade_recon (reconciliation metadata)."""
     __tablename__ = 'trade_recon'

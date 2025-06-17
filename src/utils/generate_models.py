@@ -46,15 +46,7 @@ def get_non_partition_tables() -> List[str]:
         # System tables
         "schema_migrations",
         "schema_version",
-        
-        # Staging tables
-        "stg_accounts_daily_snapshots",
-        
-        # Feature tables (add these if they exist)
-        # "features_ta_analytics",
-        # "features_risk_metrics",
-        # "predictions",
-        # "model_metrics"
+       
     ]
 
 

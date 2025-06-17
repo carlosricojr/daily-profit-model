@@ -37,12 +37,12 @@ class DatabaseConnection:
         self.schema = schema
         
         # Create SQLAlchemy engine
-        # Use up to 75% of available connections (150 out of 200)
+        # Use up to 75% of available connections (450 out of 600)
         self.engine = create_engine(
             connection_string,
             poolclass=QueuePool,
-            pool_size=10,           # Base pool size matches tests
-            max_overflow=20,        # Keep reasonable overflow matching tests
+            pool_size=150,          # Base pool size (25% of 600)
+            max_overflow=300,       # Allow up to 450 total connections (75% of 600)
             pool_pre_ping=True,     # Test connections before use
             pool_recycle=3600,      # Recycle connections after 1 hour
             echo=False
@@ -84,8 +84,7 @@ class DatabaseConnection:
                 return [dict(row) for row in cur.fetchall()]
     
     def execute_query_df(self, query: str, params: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
-        """Execute a SELECT query and return results as pandas DataFrame."""
-        # Use raw psycopg2 connection for pandas compatibility
+        """Execute a SELECT query and return results as pandas DataFrame using SQLAlchemy connectable to avoid pandas warning."""
         with self.get_connection() as conn:
             return pd.read_sql_query(query, conn, params=params)
     
@@ -300,8 +299,8 @@ def execute_query_df(query: str, params: Optional[Dict[str, Any]] = None) -> pd.
 
 
 def read_sql(query: str, params: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
-    """Alias for execute_query_df for pandas compatibility."""
-    return execute_query_df(query, params)
+    """Utility wrapper around execute_query_df for external modules."""
+    return get_db_manager().model_db.execute_query_df(query, params)
 
 
 def to_sql(df: pd.DataFrame, table_name: str, schema: str = "prop_trading_model", 

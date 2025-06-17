@@ -433,7 +433,7 @@ class PipelineOrchestrator:
                         
                         if not table_success and failed_expectations > 0:
                             # Determine if this is critical or warning based on table importance
-                            if table_name in ["stg_accounts_daily_snapshots", "raw_metrics_daily", "raw_metrics_alltime"]:
+                            if table_name in ["raw_metrics_daily", "raw_metrics_alltime", "raw_metrics_hourly", "raw_trades_closed", "raw_trades_open"]:
                                 failed_tables.append(f"{table_name}: {failed_expectations}/{total_expectations} expectations failed")
                             else:
                                 warning_tables.append(f"{table_name}: {failed_expectations}/{total_expectations} expectations failed")
@@ -508,16 +508,6 @@ class PipelineOrchestrator:
                         WHERE date = %s
                     """,
                     "min_threshold": 50,
-                    "params": [validation_date - timedelta(days=1)],
-                },
-                {
-                    "name": "staging_snapshots_completeness",
-                    "query": """
-                        SELECT COUNT(*) as count
-                        FROM prop_trading_model.stg_accounts_daily_snapshots
-                        WHERE snapshot_date = %s
-                    """,
-                    "min_threshold": 30,
                     "params": [validation_date - timedelta(days=1)],
                 },
             ]

@@ -57,7 +57,6 @@ uv run --env-file .env -- python -m src.pipeline_orchestration.run_pipeline_ --s
 - `raw_trades_closed` - Historical trades (partitioned)
 - `raw_plans_data` - Trading plan definitions
 - `raw_regimes_daily` - Market regime indicators
-- `stg_accounts_daily_snapshots` - Cleaned/validated data
 - `feature_store_account_daily` - ML features
 - `model_training_input` - Training dataset
 - `model_predictions` - Predictions output

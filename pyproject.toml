@@ -47,6 +47,7 @@ dependencies = [
     "apache-airflow>=3.0.2",
     "apache-airflow-providers-postgres>=6.2.0",
     "xxhash>=3.5.0",
+    "dask>=2025.5.1",
 ]
 
 [project.urls]

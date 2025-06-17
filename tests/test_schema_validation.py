@@ -247,7 +247,7 @@ class SchemaValidator:
         # Index naming
         for index_name, index_info in self.indexes.items():
             # Skip system-generated constraint names
-            if index_name.startswith(('pk_', 'uq_', 'fk_', 'raw_', 'feature_', 'model_', 'pipeline_', 'query_', 'scheduled_', 'stg_', 'mv_')):
+            if index_name.startswith(('pk_', 'uq_', 'fk_', 'raw_', 'feature_', 'model_', 'pipeline_', 'query_', 'scheduled_', 'mv_')):
                 continue
                 
             if not index_name.startswith('idx_'):

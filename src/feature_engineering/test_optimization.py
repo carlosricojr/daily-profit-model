@@ -149,22 +149,6 @@ class FeatureEngineeringPerformanceValidator:
             "optimization_efficiency": (theoretical_queries - actual_queries) / theoretical_queries * 100
         }
 
-    def _get_sample_accounts(
-        self, start_date: date, end_date: date, limit: int = 5
-    ) -> List[str]:
-        """Get a sample of active accounts for testing."""
-        query = """
-        SELECT DISTINCT account_id
-        FROM stg_accounts_daily_snapshots
-        WHERE snapshot_date >= %s AND snapshot_date <= %s
-        ORDER BY account_id
-        LIMIT %s
-        """
-        results = self.db_manager.model_db.execute_query(
-            query, (start_date, end_date, limit)
-        )
-        return [r["account_id"] for r in results]
-
     def _cleanup_test_data(
         self, account_ids: List[str], start_date: date, end_date: date
     ):

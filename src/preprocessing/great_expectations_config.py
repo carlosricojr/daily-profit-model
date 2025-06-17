@@ -634,7 +634,6 @@ class GreatExpectationsValidator:
             "raw_metrics_alltime": "raw_metrics_alltime_suite",
             "raw_metrics_daily": "raw_metrics_daily_suite", 
             "raw_metrics_hourly": "raw_metrics_hourly_suite",
-            "stg_accounts_daily_snapshots": "staging_snapshots_suite",
             "raw_trades_closed": "raw_trades_closed_suite",
             "raw_trades_open": "raw_trades_open_suite",
             "raw_plans_data": "raw_plans_data_suite",
@@ -652,8 +651,6 @@ class GreatExpectationsValidator:
                 query = f"SELECT * FROM {schema}.{table_name} WHERE date = '{date_filter}'"
             elif table_name in ["raw_trades_closed", "raw_trades_open"]:
                 query = f"SELECT * FROM {schema}.{table_name} WHERE trade_date = '{date_filter}'"
-            elif table_name == "stg_accounts_daily_snapshots":
-                query = f"SELECT * FROM {schema}.{table_name} WHERE snapshot_date = '{date_filter}'"
             else:
                 query = f"SELECT * FROM {schema}.{table_name} LIMIT 10000"
         else:
@@ -788,8 +785,11 @@ class GreatExpectationsValidator:
         core_tables = [
             "raw_metrics_alltime",
             "raw_metrics_daily", 
+            "raw_metrics_hourly",
             "raw_trades_closed",
-            "stg_accounts_daily_snapshots"
+            "raw_trades_open",
+            "raw_plans_data",
+            "mv_regimes_daily_features"
         ]
         
         for table in core_tables:

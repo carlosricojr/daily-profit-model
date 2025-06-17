@@ -12,7 +12,7 @@ echo "🔄 Database Sync Tool"
 echo "===================="
 echo
 echo "This will sync the prop_trading_model schema from production to your local database."
-echo "Data size: ~17 GB (this may take a while)"
+echo "Data size: ~24 GB (this may take a while)"
 echo
 read -p "Do you want to continue? (y/N) " -n 1 -r
 echo
