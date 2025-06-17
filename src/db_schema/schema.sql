@@ -345,12 +345,6 @@ CREATE TABLE raw_metrics_daily (
     risk_adj_ret DOUBLE PRECISION,
     downside_std_rets DOUBLE PRECISION,
     downside_risk_adj_ret DOUBLE PRECISION,
-    total_ret DOUBLE PRECISION,
-    daily_mean_ret DOUBLE PRECISION,
-    daily_std_ret DOUBLE PRECISION,
-    daily_sharpe DOUBLE PRECISION,
-    daily_downside_std_ret DOUBLE PRECISION,
-    daily_sortino DOUBLE PRECISION,
     
     -- Relative metrics
     rel_net_profit DECIMAL(18, 6),
@@ -885,7 +879,6 @@ CREATE TABLE raw_plans_data (
     inactivity_period INTEGER CHECK (inactivity_period >= 0),
     daily_drawdown_by_balance_equity BOOLEAN DEFAULT FALSE,
     enable_consistency BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP,
     updated_at TIMESTAMP,
     ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     source_api_endpoint VARCHAR(500)

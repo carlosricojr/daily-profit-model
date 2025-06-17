@@ -210,12 +210,7 @@ class MetricsIngester(BaseIngester):
             'riskAdjRet': 'risk_adj_ret',
             'downsideStdRets': 'downside_std_rets',
             'downsideRiskAdjRet': 'downside_risk_adj_ret',
-            'totalRet': 'total_ret',
-            'dailyMeanRet': 'daily_mean_ret',
-            'dailyStdRet': 'daily_std_ret',
-            'dailySharpe': 'daily_sharpe',
-            'dailyDownsideStdRet': 'daily_downside_std_ret',
-            'dailySortino': 'daily_sortino',
+            'totalRet': 'total_ret'
         }
         
         # Relative (normalized) metrics
@@ -336,29 +331,34 @@ class MetricsIngester(BaseIngester):
             'minTradesPerDay': 'min_trades_per_day',
             'maxTradesPerDay': 'max_trades_per_day',
             'cvTradesPerDay': 'cv_trades_per_day',
-            'meanIdleDays': 'mean_idle_days',
-            'medianIdleDays': 'median_idle_days',
-            'maxIdleDays': 'max_idle_days',
-            'minIdleDays': 'min_idle_days',
             'numTradedSymbols': 'num_traded_symbols',
             'mostTradedSymbol': 'most_traded_symbol',
             'mostTradedSmbTrades': 'most_traded_smb_trades'
         }
         
+        # All Time-specific fields
+        self.alltime_specific_fields = {
+            'dailyMeanRet': 'daily_mean_ret',
+            'dailyStdRet': 'daily_std_ret',
+            'dailySharpe': 'daily_sharpe',
+            'dailyDownsideStdRet': 'daily_downside_std_ret',
+            'dailySortino': 'daily_sortino',
+            'meanIdleDays': 'mean_idle_days',
+            'medianIdleDays': 'median_idle_days',
+            'maxIdleDays': 'max_idle_days',
+            'minIdleDays': 'min_idle_days',
+            'updatedDate': 'updated_date'
+        }
+
         # Daily-specific fields
-        self.daily_hourly_specific_fields = {
+        self.daily_specific_fields = {
             'days_to_next_payout': 'days_to_next_payout',
             'todays_payouts': 'todays_payouts'
-        }
+            }
 
         # Hourly-specific fields
         self.hourly_specific_fields = {
             'hour': 'hour'
-        }
-        
-        # Other fields
-        self.alltime_specific_fields = {
-            'updatedDate': 'updated_date',
         }
         
         # Combine all field mappings for alltime metrics
@@ -400,7 +400,7 @@ class MetricsIngester(BaseIngester):
             **self.streak_fields,
             **self.position_fields,
             **self.margin_activity_fields,
-            **self.daily_hourly_specific_fields
+            **self.daily_specific_fields
         }
         
         # Hourly metrics use similar fields as daily
@@ -421,7 +421,6 @@ class MetricsIngester(BaseIngester):
             **self.streak_fields,
             **self.position_fields,
             **self.margin_activity_fields,
-            **self.daily_hourly_specific_fields,
             **self.hourly_specific_fields
         }
 
@@ -1524,13 +1523,12 @@ class MetricsIngester(BaseIngester):
                     record[db_field] = str(value) if value is not None else None
                 elif db_field in ['plan_id', 'status', 'type', 'phase', 'broker', 'platform', 'price_stream',
                                 'days_since_initial_deposit', 'days_since_first_trade', 'num_trades',
-                                'days_to_next_payout',  # ADDED: New daily-specific field
-                                'max_num_trades_in_dd',  # Only max is integer
+                                'days_to_next_payout',
+                                'max_num_trades_in_dd',
                                 'median_num_consec_wins', 'max_num_consec_wins',
                                 'median_num_consec_losses', 'max_num_consec_losses',
                                 'median_num_open_pos', 'max_num_open_pos',
                                 'median_trades_per_day', 'min_trades_per_day', 'max_trades_per_day',
-                                'median_idle_days', 'max_idle_days', 'min_idle_days',
                                 'num_traded_symbols', 'most_traded_smb_trades']:
                     record[db_field] = self._safe_int(value)
                 elif db_field == 'first_trade_date':
@@ -1556,7 +1554,7 @@ class MetricsIngester(BaseIngester):
                     record[db_field] = self._safe_bound_extreme(value, db_field)
                 elif db_field in ['mean_num_trades_in_dd', 'median_num_trades_in_dd',  # FIXED: These are decimals
                                 'mean_num_consec_wins', 'mean_num_consec_losses', 'mean_num_open_pos',  # FIXED: These can be decimals
-                                'mean_trades_per_day', 'mean_idle_days',
+                                'mean_trades_per_day',
                                 'todays_payouts']:  # ADDED: New daily-specific field
                     # Decimal fields that represent averages/means or can be decimal values
                     record[db_field] = self._safe_float(value)
@@ -1602,13 +1600,11 @@ class MetricsIngester(BaseIngester):
                     record[db_field] = str(value) if value is not None else None
                 elif db_field in ['plan_id', 'status', 'type', 'phase', 'broker', 'platform', 'price_stream',
                                 'days_since_initial_deposit', 'days_since_first_trade', 'num_trades',
-                                'days_to_next_payout',  # Hourly-specific field
-                                'max_num_trades_in_dd',  # Only max is integer
+                                'max_num_trades_in_dd',
                                 'median_num_consec_wins', 'max_num_consec_wins',
                                 'median_num_consec_losses', 'max_num_consec_losses',
                                 'median_num_open_pos', 'max_num_open_pos',
                                 'median_trades_per_day', 'min_trades_per_day', 'max_trades_per_day',
-                                'median_idle_days', 'max_idle_days', 'min_idle_days',
                                 'num_traded_symbols', 'most_traded_smb_trades']:
                     record[db_field] = self._safe_int(value)
                 elif db_field == 'first_trade_date':
@@ -1634,7 +1630,7 @@ class MetricsIngester(BaseIngester):
                     record[db_field] = self._safe_bound_extreme(value, db_field)
                 elif db_field in ['mean_num_trades_in_dd', 'median_num_trades_in_dd',  # FIXED: These can be decimals
                                 'mean_num_consec_wins', 'mean_num_consec_losses', 'mean_num_open_pos',  # FIXED: These can be decimals
-                                'mean_trades_per_day', 'mean_idle_days',
+                                'mean_trades_per_day',
                                 'todays_payouts']:  # Hourly-specific field
                     # Decimal fields that represent averages/means or can be decimal values
                     record[db_field] = self._safe_float(value)

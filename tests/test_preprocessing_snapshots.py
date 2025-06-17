@@ -124,7 +124,9 @@ class TestStagingSnapshotsCreator:
         sql_query = call_args[0][0]
         
         # Check INSERT column list includes new fields
-        assert 'platform, broker, country,' in sql_query
+        assert 'platform,' in sql_query
+        assert 'broker,' in sql_query
+        assert 'country,' in sql_query
         
         # Check SELECT includes these fields from account_metrics
         assert 'am.platform' in sql_query

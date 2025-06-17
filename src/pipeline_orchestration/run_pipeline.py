@@ -716,6 +716,12 @@ class PipelineOrchestrator:
 
     def _is_stage_completed(self, stage_name: str) -> bool:
         """Check if a stage has completed successfully today."""
+        # For preprocessing stages, check if yesterday's data has been processed
+        # since preprocessing runs for T-1 data
+        check_date = date.today()
+        if stage_name in ['create_staging_snapshots', 'validate_data_quality']:
+            check_date = date.today() - timedelta(days=1)
+        
         query = """
         SELECT COUNT(*) as count
         FROM pipeline_execution_log
@@ -725,7 +731,7 @@ class PipelineOrchestrator:
         """
 
         result = self.db_manager.model_db.execute_query(
-            query, (stage_name, date.today())
+            query, (stage_name, check_date)
         )
 
         return result[0]["count"] > 0 if result else False

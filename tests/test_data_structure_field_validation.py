@@ -376,7 +376,7 @@ class TestDataStructureFieldValidation:
                 'ALLTIME', 'DAILY', 'HOURLY', 'CLOSED', 'OPEN',
                 # Field mapping configs
                 'alltime_field_mapping', 'daily_field_mapping', 'hourly_field_mapping',
-                'alltime_specific_fields', 'daily_hourly_specific_fields', 'hourly_specific_fields',
+                'alltime_specific_fields', 'daily_specific_fields', 'hourly_specific_fields',
                 'core_fields', 'timeline_fields', 'performance_fields', 'distribution_fields',
                 'outlier_fields', 'volume_lot_fields', 'duration_fields', 'sl_tp_fields',
                 'streak_fields', 'drawdown_fields', 'position_fields', 'margin_activity_fields',
