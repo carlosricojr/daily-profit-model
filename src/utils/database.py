@@ -83,10 +83,32 @@ class DatabaseConnection:
                 cur.execute(query, params)
                 return [dict(row) for row in cur.fetchall()]
     
-    def execute_query_df(self, query: str, params: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
-        """Execute a SELECT query and return results as pandas DataFrame using SQLAlchemy connectable to avoid pandas warning."""
+    def execute_query_df(
+        self,
+        query: str,
+        params: Optional[Dict[str, Any]] = None,
+        *,
+        timeout_seconds: Optional[int] = None,
+        chunksize: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """Execute a SELECT query and return results as a pandas DataFrame.
+
+        A per-statement timeout can be supplied which maps to PostgreSQL's
+        ``statement_timeout`` (in **seconds**). Pass ``timeout_seconds=0`` to
+        disable the timeout for this query.
+
+        For very large result sets you may optionally supply a *chunksize*;
+        in that case a generator of DataFrames is returned (mirroring
+        ``pandas.read_sql_query`` behaviour).
+        """
+
         with self.get_connection() as conn:
-            return pd.read_sql_query(query, conn, params=params)
+            if timeout_seconds is not None:
+                timeout_ms = int(timeout_seconds * 1000)
+                with conn.cursor() as cur:
+                    cur.execute(f"SET LOCAL statement_timeout = {timeout_ms}")
+
+            return pd.read_sql_query(query, conn, params=params, chunksize=chunksize)
     
     def execute_command(self, query: str, params: Optional[Dict[str, Any]] = None, 
                       timeout_seconds: Optional[int] = None) -> int:
@@ -293,9 +315,21 @@ def execute_query(query: str, params: Optional[Dict[str, Any]] = None) -> List[D
     return get_db_manager().model_db.execute_query(query, params)
 
 
-def execute_query_df(query: str, params: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
-    """Execute a query and return DataFrame using the model database."""
-    return get_db_manager().model_db.execute_query_df(query, params)
+def execute_query_df(
+    query: str,
+    params: Optional[Dict[str, Any]] = None,
+    *,
+    timeout_seconds: Optional[int] = None,
+    chunksize: Optional[int] = None,
+) -> pd.DataFrame:
+    """Execute a query and return DataFrame using the model database.
+
+    Additional keyword-only arguments mirror those of
+    ``DatabaseConnection.execute_query_df`` (see that docstring).
+    """
+    return get_db_manager().model_db.execute_query_df(
+        query, params, timeout_seconds=timeout_seconds, chunksize=chunksize
+    )
 
 
 def read_sql(query: str, params: Optional[Dict[str, Any]] = None) -> pd.DataFrame:

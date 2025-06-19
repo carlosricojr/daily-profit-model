@@ -47,13 +47,25 @@ DUMP_FILE="/tmp/prod_dump.custom"
 # Dump production database (custom compressed format)
 echo "Dumping production database to $DUMP_FILE (custom format)..."
 pg_dump -h "$PROD_HOST" -p "$PROD_PORT" -U "$PROD_USER" -d "$PROD_DB" \
-    --table=public.regimes_daily \
     --schema=prop_trading_model \
     -Fc \
     -f "$DUMP_FILE"
 
 if [ $? -ne 0 ]; then
     echo "Error: Failed to dump production database"
+    exit 1
+fi
+
+# Also dump public.regimes_daily table
+REGIMES_DUMP_FILE="/tmp/regimes_daily_dump.custom"
+echo "Dumping public.regimes_daily table to $REGIMES_DUMP_FILE..."
+pg_dump -h "$PROD_HOST" -p "$PROD_PORT" -U "$PROD_USER" -d "$PROD_DB" \
+    --table=public.regimes_daily \
+    -Fc \
+    -f "$REGIMES_DUMP_FILE"
+
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to dump public.regimes_daily table"
     exit 1
 fi
 
@@ -94,10 +106,30 @@ if [ $PG_RESTORE_EXIT -ne 0 ]; then
     fi
 fi
 
+# Now restore the public.regimes_daily table
+echo "Restoring public.regimes_daily table..."
+set +e
+pg_restore -h "$LOCAL_HOST" -p "$LOCAL_PORT" -U "$LOCAL_USER" -d "$LOCAL_DB" \
+    --no-owner --no-acl --clean --if-exists \
+    "$REGIMES_DUMP_FILE" 2>&1 | tee -a "$RESTORE_LOG"
+REGIMES_RESTORE_EXIT=$?
+set -e
+
+if [ $REGIMES_RESTORE_EXIT -ne 0 ]; then
+    if grep -q "unrecognized configuration parameter \"transaction_timeout\"" "$RESTORE_LOG" && \
+       ! grep -q "ERROR:  " "$RESTORE_LOG" | grep -v "unrecognized configuration parameter \"transaction_timeout\""; then
+        echo "Ignoring transaction_timeout warnings for regimes_daily – restore completed with non-fatal issues."
+    else
+        echo "Error: Failed to restore public.regimes_daily table"
+        exit 1
+    fi
+fi
+
 # Clean up restore log
 rm -f "$RESTORE_LOG"
 
 # Clean up
 rm "$DUMP_FILE"
+rm "$REGIMES_DUMP_FILE"
 
 echo "Database sync completed successfully!"

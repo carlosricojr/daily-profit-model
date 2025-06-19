@@ -296,3 +296,6 @@ desktop.ini
 *.ipynb
 !*-template.ipynb
 !*-example.ipynb
+
+# Model artefacts
+artefacts/
