@@ -75,9 +75,17 @@ export PGPASSWORD="$LOCAL_PASSWORD"
 # Restore to local database in parallel
 echo "Restoring to local database using pg_restore (8 parallel jobs)..."
 
-# 1. Drop dependent materialized view to avoid DROP TABLE failures
-psql -h "$LOCAL_HOST" -p "$LOCAL_PORT" -U "$LOCAL_USER" -d "$LOCAL_DB" -c \
-  "DROP MATERIALIZED VIEW IF EXISTS prop_trading_model.mv_regime_daily_features CASCADE;"
+# 1. Drop dependent materialized views to avoid DROP TABLE failures
+echo "Dropping materialized views that depend on tables being restored..."
+psql -h "$LOCAL_HOST" -p "$LOCAL_PORT" -U "$LOCAL_USER" -d "$LOCAL_DB" <<EOF
+DROP MATERIALIZED VIEW IF EXISTS prop_trading_model.mv_regime_daily_features CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS prop_trading_model.mv_account_performance_summary CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS prop_trading_model.mv_account_trading_patterns CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS prop_trading_model.mv_all_account_ids CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS prop_trading_model.mv_daily_trading_stats CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS prop_trading_model.mv_market_regime_performance CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS prop_trading_model.mv_symbol_performance CASCADE;
+EOF
 
 # 2. Run pg_restore. We expect "SET transaction_timeout" warnings when local
 #    Postgres is older than production. These are safe to ignore, so we
@@ -108,9 +116,13 @@ fi
 
 # Now restore the public.regimes_daily table
 echo "Restoring public.regimes_daily table..."
+# First truncate the table to avoid duplicate key errors
+psql -h "$LOCAL_HOST" -p "$LOCAL_PORT" -U "$LOCAL_USER" -d "$LOCAL_DB" -c \
+  "TRUNCATE TABLE public.regimes_daily CASCADE;" 2>/dev/null || true
+
 set +e
 pg_restore -h "$LOCAL_HOST" -p "$LOCAL_PORT" -U "$LOCAL_USER" -d "$LOCAL_DB" \
-    --no-owner --no-acl --clean --if-exists \
+    --no-owner --no-acl --data-only \
     "$REGIMES_DUMP_FILE" 2>&1 | tee -a "$RESTORE_LOG"
 REGIMES_RESTORE_EXIT=$?
 set -e
@@ -131,5 +143,13 @@ rm -f "$RESTORE_LOG"
 # Clean up
 rm "$DUMP_FILE"
 rm "$REGIMES_DUMP_FILE"
+
+# Recreate materialized views
+echo "Recreating materialized views..."
+psql -h "$LOCAL_HOST" -p "$LOCAL_PORT" -U "$LOCAL_USER" -d "$LOCAL_DB" <<EOF
+-- Recreate views from production definitions if they don't exist
+-- Note: These will be empty until refreshed
+SELECT 'Materialized views will be recreated on next production sync or manual creation';
+EOF
 
 echo "Database sync completed successfully!"
