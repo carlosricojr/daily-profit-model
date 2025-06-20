@@ -33,7 +33,6 @@ ARTEFACT_DIR = PROJECT_ROOT / "artefacts"
 def concatenate_with_pyarrow(chunk_files: list) -> bool:
     """Memory-efficient concatenation using PyArrow."""
     try:
-        import pyarrow as pa
         import pyarrow.parquet as pq
         
         # Get total size estimate
@@ -120,7 +119,9 @@ def validate_concatenation(output_path: pathlib.Path, chunk_files: list) -> bool
         
         # Quick sample check
         logger.info("  Checking sample data...")
-        sample_df = pd.read_parquet(output_path, columns=target_cols[:3], nrows=1000)
+        # PyArrow doesn't support nrows in read_parquet, so we'll read a small subset differently
+        sample_table = pq.read_table(output_path, columns=target_cols[:3])
+        sample_df = sample_table.slice(0, min(1000, sample_table.num_rows)).to_pandas()
         
         # Check for nulls in targets
         null_counts = sample_df[target_cols[:3]].isnull().sum()
@@ -150,16 +151,24 @@ def main():
         action='store_true',
         help="Keep chunk files after successful concatenation"
     )
+    parser.add_argument(
+        "--force",
+        action='store_true',
+        help="Overwrite existing output file without prompting"
+    )
     args = parser.parse_args()
     
     # Check if output already exists
     output_path = ARTEFACT_DIR / "train_matrix.parquet"
     if output_path.exists():
-        logger.warning(f"{output_path} already exists!")
-        response = input("Overwrite? (y/N): ")
-        if response.lower() != 'y':
-            logger.info("Cancelled")
-            return 0
+        if args.force:
+            logger.warning(f"{output_path} already exists! Overwriting due to --force flag")
+        else:
+            logger.warning(f"{output_path} already exists!")
+            response = input("Overwrite? (y/N): ")
+            if response.lower() != 'y':
+                logger.info("Cancelled")
+                return 0
     
     # Find chunk files (with targets)
     chunk_files = sorted(ARTEFACT_DIR.glob("train_chunk_*.parquet"))

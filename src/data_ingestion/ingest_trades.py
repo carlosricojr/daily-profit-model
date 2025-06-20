@@ -681,6 +681,8 @@ class TradesIngester(BaseIngester):
         try:
             with self.db_manager.model_db.get_connection() as conn:
                 with conn.cursor() as cursor:
+                    # Set a longer timeout for this operation (30 minutes)
+                    cursor.execute("SET statement_timeout = '1800000'")  # 30 minutes in milliseconds
                     # First check if there are any trades needing resolution
                     cursor.execute(f"""
                         SELECT COUNT(*)
@@ -699,37 +701,69 @@ class TradesIngester(BaseIngester):
                     logger.info(f"Found {total_null_count:,} trades needing account_id resolution")
                     
                     # Process in batches to avoid statement timeout
-                    batch_size = 100000  # Process 100K rows at a time
+                    batch_size = 50000  # Process 50K rows at a time (reduced for better performance)
                     total_updated = 0
                     batch_num = 0
+                    
+                    # Create an index if it doesn't exist to speed up the lookup
+                    try:
+                        cursor.execute(f"""
+                            CREATE INDEX IF NOT EXISTS idx_{table_name.split('.')[-1]}_account_lookup 
+                            ON {table_name} (login, platform, broker) 
+                            WHERE account_id IS NULL
+                        """)
+                        conn.commit()
+                    except Exception as e:
+                        logger.warning(f"Could not create index: {e}")
+                        conn.rollback()
                     
                     while True:
                         batch_num += 1
                         
-                        # Update a batch of rows using CTID for stable row identification
+                        # First, create a temporary table with the batch of rows to update
+                        cursor.execute(f"""
+                            CREATE TEMP TABLE IF NOT EXISTS batch_update_{batch_num} AS
+                            SELECT ctid AS row_ctid, login, platform, broker
+                            FROM {table_name}
+                            WHERE account_id IS NULL
+                            AND login IS NOT NULL
+                            AND platform IS NOT NULL
+                            AND broker IS NOT NULL
+                            LIMIT {batch_size}
+                        """)
+                        
+                        # Check if we got any rows
+                        cursor.execute(f"SELECT COUNT(*) FROM batch_update_{batch_num}")
+                        batch_count = cursor.fetchone()[0]
+                        
+                        if batch_count == 0:
+                            cursor.execute(f"DROP TABLE IF EXISTS batch_update_{batch_num}")
+                            break
+                        
+                        # Update using the temporary table
                         cursor.execute(f"""
                             UPDATE {table_name} t
                             SET account_id = m.account_id
-                            FROM prop_trading_model.raw_metrics_alltime m
-                            WHERE t.login = m.login
-                            AND t.platform = m.platform
-                            AND t.broker = m.broker
-                            AND t.account_id IS NULL
-                            AND t.login IS NOT NULL
-                            AND t.platform IS NOT NULL
-                            AND t.broker IS NOT NULL
-                            AND t.ctid IN (
-                                SELECT ctid 
-                                FROM {table_name}
-                                WHERE account_id IS NULL
-                                AND login IS NOT NULL
-                                AND platform IS NOT NULL
-                                AND broker IS NOT NULL
-                                LIMIT {batch_size}
-                            )
+                            FROM batch_update_{batch_num} b
+                            JOIN prop_trading_model.raw_metrics_alltime m
+                                ON b.login = m.login
+                                AND b.platform = m.platform
+                                AND b.broker = m.broker
+                            WHERE t.ctid = b.row_ctid
                         """)
-                    
+                        
+                        # Get the row count immediately after UPDATE
                         batch_updated = cursor.rowcount
+                        
+                        # Clean up temp table
+                        cursor.execute(f"DROP TABLE batch_update_{batch_num}")
+                    
+                        # Handle the case where rowcount might be -1 (indeterminate)
+                        if batch_updated < 0:
+                            logger.warning(f"Batch {batch_num}: Row count indeterminate, assuming batch size was processed")
+                            # When rowcount is -1, we can't determine exact count, but we know we processed batch_count rows
+                            batch_updated = batch_count
+                        
                         if batch_updated == 0:
                             break
                         
@@ -1145,7 +1179,7 @@ def main():
     args = parser.parse_args()
 
     # Set up logging
-    setup_logging(log_level=args.log_level, log_file=f"trades_{args.trade_type}")
+    setup_logging(log_level=args.log_level, log_file=f"trades_{args.trade_type}", enable_json=False, enable_structured=False)
 
     # Run ingestion
     ingester = TradesIngester()

@@ -828,24 +828,6 @@ class RawPlansData(Base):
     source_api_endpoint: Mapped[Optional[str]] = mapped_column(String(500))
 
 
-class RawRegimesDaily(Base):
-    __tablename__ = 'raw_regimes_daily'
-    __table_args__ = (
-        PrimaryKeyConstraint('id', name='raw_regimes_daily_pkey'),
-        UniqueConstraint('date', name='raw_regimes_daily_date_key'),
-        Index('idx_raw_regimes_date', 'date'),
-        Index('idx_raw_regimes_summary', 'summary'),
-        {'schema': 'prop_trading_model'}
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    date: Mapped[datetime.date] = mapped_column(Date)
-    regime_name: Mapped[Optional[str]] = mapped_column(String(100))
-    summary: Mapped[Optional[dict]] = mapped_column(JSONB)
-    ingestion_timestamp: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
-    source_api_endpoint: Mapped[Optional[str]] = mapped_column(String(500))
-
-
 class RawTradesClosed(Base):
     __tablename__ = 'raw_trades_closed'
     __table_args__ = (

@@ -21,6 +21,7 @@ dependencies = [
     "woodwork>=0.31.0",
     # ML model optimization and interpretation
     "optuna>=4.3.0",
+    "optuna-integration[lightgbm]>=4.3.0",
     "shap>=0.47.2",
     # Database and data storage
     "sqlalchemy>=1.4.36,<2.0",
@@ -47,9 +48,8 @@ dependencies = [
     "apache-airflow>=3.0.2",
     "apache-airflow-providers-postgres>=6.2.0",
     "xxhash>=3.5.0",
-    "dask[distributed]>=2023.2.0,<2024.3.0",
     "pyarrow>=20.0.0",
-    "bokeh>=3.7.3",
+    "dask[distributed]>=2024.4.1",
 ]
 
 [project.urls]

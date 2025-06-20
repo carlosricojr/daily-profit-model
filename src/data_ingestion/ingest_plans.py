@@ -5,6 +5,7 @@ Handles plan data ingestion from CSV files with production-ready features.
 
 import os
 import sys
+import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple, Union
 from pathlib import Path
@@ -612,30 +613,50 @@ class PlansIngester(BaseIngester):
             use_parallel = len(files_to_process) > 1 and not checkpoint
 
             if use_parallel:
-                max_workers = min(8, len(files_to_process))
+                # Reduce workers to avoid connection exhaustion
+                # Supabase has connection limits, so use fewer workers
+                max_workers = min(3, len(files_to_process))
                 logger.info(f"Processing plan files in parallel with {max_workers} workers")
 
                 def process_file_parallel(fp: Path) -> Tuple[int, Dict[str, Any]]:
                     """Isolated worker to process a single CSV file."""
-                    # Use a temp checkpoint dir to avoid clashes
-                    tmp_dir = _make_tempdir(prefix="plans_ckpt_")
-                    sub_ing = PlansIngester(
-                        checkpoint_dir=tmp_dir,
-                        enable_validation=self.enable_validation,
-                        enable_deduplication=self.enable_deduplication,
-                    )
-                    # Disable checkpoint writes in worker (safe simplification)
-                    sub_ing.checkpoint_manager.save_checkpoint = lambda *a, **k: None
-                    sub_ing.checkpoint_manager.clear_checkpoint = lambda *a, **k: None
-                    try:
-                        recs = sub_ing._process_csv_file(fp, None)
-                        return recs, sub_ing.metrics.to_dict()
-                    finally:
-                        sub_ing.close()
+                    # Retry logic for connection failures
+                    max_retries = 3
+                    retry_delay = 2.0
+                    
+                    for attempt in range(max_retries):
+                        try:
+                            # Use a temp checkpoint dir to avoid clashes
+                            tmp_dir = _make_tempdir(prefix="plans_ckpt_")
+                            sub_ing = PlansIngester(
+                                checkpoint_dir=tmp_dir,
+                                enable_validation=self.enable_validation,
+                                enable_deduplication=self.enable_deduplication,
+                            )
+                            # Disable checkpoint writes in worker (safe simplification)
+                            sub_ing.checkpoint_manager.save_checkpoint = lambda *a, **k: None
+                            sub_ing.checkpoint_manager.clear_checkpoint = lambda *a, **k: None
+                            try:
+                                recs = sub_ing._process_csv_file(fp, None)
+                                return recs, sub_ing.metrics.to_dict()
+                            finally:
+                                sub_ing.close()
+                        except Exception as e:
+                            if "Max client connections reached" in str(e) and attempt < max_retries - 1:
+                                logger.warning(f"Connection limit reached for {fp.name}, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})")
+                                time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                            else:
+                                raise
 
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     _submit = getattr(executor, "submit")
-                    futures = {_submit(process_file_parallel, fp): fp for fp in files_to_process}
+                    futures = {}
+                    # Stagger task submission to avoid connection spikes
+                    for i, fp in enumerate(files_to_process):
+                        futures[_submit(process_file_parallel, fp)] = fp
+                        # Small delay between submissions to avoid connection rush
+                        if i < len(files_to_process) - 1:
+                            time.sleep(0.2)
                     for fut in as_completed(futures):
                         fp = futures[fut]
                         try:
@@ -720,7 +741,7 @@ def main():
     # Set up logging
     from utils.logging_config import setup_logging
 
-    setup_logging(log_level=args.log_level, log_file="ingest_plans")
+    setup_logging(log_level=args.log_level, log_file="ingest_plans", enable_json=False, enable_structured=False)
 
     # Run ingestion
     ingester = PlansIngester(

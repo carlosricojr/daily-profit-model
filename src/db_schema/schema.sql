@@ -894,21 +894,6 @@ COMMENT ON COLUMN raw_plans_data.inactivity_period IS 'Number of days an account
 COMMENT ON COLUMN raw_plans_data.daily_drawdown_by_balance_equity IS 'How daily drawdown is calculated (TRUE = from previous day balance or equity whichever is higher, FALSE = from previous day balance only)';
 COMMENT ON COLUMN raw_plans_data.enable_consistency IS 'Whether consistency rules are applied to the account';
 
--- Raw market regimes daily data
-CREATE TABLE raw_regimes_daily (
-    id SERIAL PRIMARY KEY,
-    date DATE NOT NULL,
-    regime_name VARCHAR(100),
-    summary JSONB,
-    ingestion_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    source_api_endpoint VARCHAR(500),
-    UNIQUE(date)
-);
-
--- Indexes for raw_regimes_daily
-CREATE INDEX idx_raw_regimes_date ON raw_regimes_daily(date DESC);
-CREATE INDEX idx_raw_regimes_summary ON raw_regimes_daily USING gin(summary);
-
 -- ========================================
 -- Feature Store (ML Layer)
 -- ========================================

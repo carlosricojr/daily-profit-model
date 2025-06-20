@@ -152,4 +152,17 @@ psql -h "$LOCAL_HOST" -p "$LOCAL_PORT" -U "$LOCAL_USER" -d "$LOCAL_DB" <<EOF
 SELECT 'Materialized views will be recreated on next production sync or manual creation';
 EOF
 
+# ------------------------------------------------------------------------------
+# Refresh prop_trading_model.mv_regime_daily_features now that all data is loaded
+# ------------------------------------------------------------------------------
+echo "Refreshing materialized view prop_trading_model.mv_regime_daily_features ..."
+
+REFRESH_QUERY="REFRESH MATERIALIZED VIEW prop_trading_model.mv_regime_daily_features;"
+psql -h "$LOCAL_HOST" -p "$LOCAL_PORT" -U "$LOCAL_USER" -d "$LOCAL_DB" -c "$REFRESH_QUERY" 2>/dev/null || \
+
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to refresh prop_trading_model.mv_regime_daily_features"
+    exit 1
+fi
+
 echo "Database sync completed successfully!"

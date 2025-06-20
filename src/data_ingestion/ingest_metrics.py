@@ -1818,7 +1818,7 @@ def main():
 
     # Set up logging
     from utils.logging_config import setup_logging
-    setup_logging(log_level=args.log_level, log_file="metrics_ingestion")
+    setup_logging(log_level=args.log_level, log_file="metrics_ingestion", enable_json=False, enable_structured=False)
 
     # Run ingestion
     ingester = MetricsIngester()

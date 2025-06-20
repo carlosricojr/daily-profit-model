@@ -37,14 +37,15 @@ class DatabaseConnection:
         self.schema = schema
         
         # Create SQLAlchemy engine
-        # Use up to 75% of available connections (450 out of 600)
+        # Use conservative connection settings for Supabase
+        # Supabase pooler has limited connections, so keep pool small
         self.engine = create_engine(
             connection_string,
             poolclass=QueuePool,
-            pool_size=150,          # Base pool size (25% of 600)
-            max_overflow=300,       # Allow up to 450 total connections (75% of 600)
+            pool_size=5,            # Small base pool size
+            max_overflow=10,        # Allow up to 15 total connections per instance
             pool_pre_ping=True,     # Test connections before use
-            pool_recycle=3600,      # Recycle connections after 1 hour
+            pool_recycle=300,       # Recycle connections after 5 minutes
             echo=False
         )
         

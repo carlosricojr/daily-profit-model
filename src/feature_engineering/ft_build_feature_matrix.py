@@ -31,7 +31,7 @@ import gc
 import xxhash
 import traceback
 from .utils import prepare_dataframe, make_daily_id, make_hash_id, split_date_range_into_chunks
-from .dtype_utils import convert_to_float32
+from .dtype_utils import optimize_dtypes
 import psutil
 
 # ---------------------------------------------------------------------------
@@ -118,43 +118,66 @@ def main() -> None:
     dask_kwargs = _init_dask_cluster()
 
     # -----------------------------------------------------------------------
-    # Load data from the database (no LIMIT now)
+    # Load data from cleaned parquet files
     # -----------------------------------------------------------------------
-    print("Loading raw tables …")
-    # Disable statement_timeout for bulk reads (~millions of rows)
-    _NO_TIMEOUT = 0  # PostgreSQL interprets 0 as "never timeout"
-
-    testing_filters = {
-        'start': '2025-01-01',
-        'end': '2025-01-31',
-    }
-
-    if TESTING == True:
-        DAILY_METRICS   = execute_query_df(
-            """
-            SELECT * FROM raw_metrics_daily WHERE date >= %(start)s AND date <= %(end)s
-            """, params=testing_filters, timeout_seconds=_NO_TIMEOUT)
-        HOURLY_METRICS  = execute_query_df(
-            """
-            SELECT * FROM raw_metrics_hourly WHERE date >= %(start)s AND date <= %(end)s
-            """, params=testing_filters, timeout_seconds=_NO_TIMEOUT)
-        TRADES_CLOSED   = execute_query_df(
-            """
-            SELECT * FROM raw_trades_closed WHERE close_time >= %(start)s AND close_time <= %(end)s
-            """, params=testing_filters, timeout_seconds=_NO_TIMEOUT)
-        TRADES_OPEN     = execute_query_df(
-            """
-            SELECT * FROM raw_trades_open WHERE open_time >= %(start)s AND open_time <= %(end)s
-            """, params=testing_filters, timeout_seconds=_NO_TIMEOUT)
-    else:
-        DAILY_METRICS   = execute_query_df("SELECT * FROM raw_metrics_daily", timeout_seconds=_NO_TIMEOUT)
-        HOURLY_METRICS  = execute_query_df("SELECT * FROM raw_metrics_hourly", timeout_seconds=_NO_TIMEOUT)
-        TRADES_CLOSED   = execute_query_df("SELECT * FROM raw_trades_closed", timeout_seconds=_NO_TIMEOUT)
-        TRADES_OPEN     = execute_query_df("SELECT * FROM raw_trades_open", timeout_seconds=_NO_TIMEOUT)
+    print("Loading cleaned data from parquet files...")
     
-    ALLTIME_METRICS = execute_query_df("SELECT * FROM raw_metrics_alltime", timeout_seconds=_NO_TIMEOUT)
-    PLANS           = execute_query_df("SELECT * FROM raw_plans_data", timeout_seconds=_NO_TIMEOUT)
-    REGIMES_DAILY   = execute_query_df("SELECT * FROM prop_trading_model.mv_regime_daily_features", timeout_seconds=_NO_TIMEOUT)
+    # Resolve paths
+    CLEANED_DATA_DIR = PROJECT_ROOT / "artefacts" / "cleaned_data"
+    
+    # Load all dataframes
+    DAILY_METRICS = pd.read_parquet(CLEANED_DATA_DIR / "daily_metrics_df.parquet")
+    ALLTIME_METRICS = pd.read_parquet(CLEANED_DATA_DIR / "alltime_metrics_df.parquet")
+    HOURLY_METRICS = pd.read_parquet(CLEANED_DATA_DIR / "hourly_metrics_df.parquet")
+    TRADES_CLOSED = pd.read_parquet(CLEANED_DATA_DIR / "trades_closed_df.parquet")
+    TRADES_OPEN = pd.read_parquet(CLEANED_DATA_DIR / "trades_open_df.parquet")
+    PLANS = pd.read_parquet(CLEANED_DATA_DIR / "plans_df.parquet")
+    REGIMES_DAILY = pd.read_parquet(CLEANED_DATA_DIR / "regimes_daily_df.parquet")
+    
+    print(f"Loaded data shapes:")
+    print(f"  daily_metrics: {DAILY_METRICS.shape}")
+    print(f"  alltime_metrics: {ALLTIME_METRICS.shape}")
+    print(f"  hourly_metrics: {HOURLY_METRICS.shape}")
+    print(f"  trades_closed: {TRADES_CLOSED.shape}")
+    print(f"  trades_open: {TRADES_OPEN.shape}")
+    print(f"  plans: {PLANS.shape}")
+    print(f"  regimes_daily: {REGIMES_DAILY.shape}")
+    
+    # Apply testing filters if needed
+    if TESTING == True:
+        testing_filters = {
+            'start': pd.Timestamp('2025-01-01'),
+            'end': pd.Timestamp('2025-01-31'),
+        }
+        
+        print(f"Applying testing filters: {testing_filters['start']} to {testing_filters['end']}")
+        
+        # Filter date-based dataframes
+        DAILY_METRICS = DAILY_METRICS[
+            (DAILY_METRICS['date'] >= testing_filters['start']) & 
+            (DAILY_METRICS['date'] <= testing_filters['end'])
+        ].copy()
+        
+        HOURLY_METRICS = HOURLY_METRICS[
+            (HOURLY_METRICS['date'] >= testing_filters['start']) & 
+            (HOURLY_METRICS['date'] <= testing_filters['end'])
+        ].copy()
+        
+        TRADES_CLOSED = TRADES_CLOSED[
+            (pd.to_datetime(TRADES_CLOSED['close_time']) >= testing_filters['start']) & 
+            (pd.to_datetime(TRADES_CLOSED['close_time']) <= testing_filters['end'])
+        ].copy()
+        
+        TRADES_OPEN = TRADES_OPEN[
+            (pd.to_datetime(TRADES_OPEN['open_time']) >= testing_filters['start']) & 
+            (pd.to_datetime(TRADES_OPEN['open_time']) <= testing_filters['end'])
+        ].copy()
+        
+        print(f"Filtered data shapes:")
+        print(f"  daily_metrics: {DAILY_METRICS.shape}")
+        print(f"  hourly_metrics: {HOURLY_METRICS.shape}")
+        print(f"  trades_closed: {TRADES_CLOSED.shape}")
+        print(f"  trades_open: {TRADES_OPEN.shape}")
 
     # -------------------------------------------------------------------
     # Exclude data that belongs to trader_ids present in the exclusion list
@@ -193,14 +216,16 @@ def main() -> None:
         HOURLY_METRICS  = _exclude(HOURLY_METRICS, "HOURLY_METRICS")
     # -------------------------------------------------------------------
 
-    # Convert to float32
-    DAILY_METRICS = convert_to_float32(DAILY_METRICS)
-    ALLTIME_METRICS = convert_to_float32(ALLTIME_METRICS)
-    HOURLY_METRICS = convert_to_float32(HOURLY_METRICS)
-    TRADES_CLOSED = convert_to_float32(TRADES_CLOSED)
-    TRADES_OPEN = convert_to_float32(TRADES_OPEN)
-    PLANS = convert_to_float32(PLANS)
-    REGIMES_DAILY = convert_to_float32(REGIMES_DAILY)
+    # Note: dtypes should already be optimized from the cleaned parquet files
+    # The prepare_data.py pipeline already applies optimize_dtypes before saving
+    # If needed for safety after exclusions, uncomment the lines below:
+    # DAILY_METRICS = optimize_dtypes(DAILY_METRICS)
+    # ALLTIME_METRICS = optimize_dtypes(ALLTIME_METRICS)
+    # HOURLY_METRICS = optimize_dtypes(HOURLY_METRICS)
+    # TRADES_CLOSED = optimize_dtypes(TRADES_CLOSED)
+    # TRADES_OPEN = optimize_dtypes(TRADES_OPEN)
+    # PLANS = optimize_dtypes(PLANS)
+    # REGIMES_DAILY = optimize_dtypes(REGIMES_DAILY)
 
     # -----------------------------------------------------------------------
     # Key engineering

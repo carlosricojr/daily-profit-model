@@ -4,7 +4,6 @@ Security audit script to check for exposed credentials and sensitive data.
 Run this before committing code to ensure no secrets are exposed.
 """
 
-import os
 import re
 import sys
 from pathlib import Path

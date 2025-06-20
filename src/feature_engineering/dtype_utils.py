@@ -9,73 +9,64 @@ particularly for reducing memory usage by converting float64 to float32.
 import pandas as pd
 import numpy as np
 import logging
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-MAX_REL_ERROR = 1e-6
+def optimize_dtypes(df: pd.DataFrame, exclude_from_categorical: Optional[List[str]] = None) -> pd.DataFrame:
+    if exclude_from_categorical is None:
+        exclude_from_categorical = []
+    
+    # First, convert any datetime columns that are stored as objects
+    datetime_cols = []
+    for col in df.columns:
+        if col in ['date', 'datetime', 'first_trade_date', 'ingestion_timestamp'] or 'date' in col.lower():
+            try:
+                df[col] = pd.to_datetime(df[col])
+                datetime_cols.append(col)
+                print(f"Converted {col} to datetime type")
+            except:
+                pass
+    
+    # Downcast integer columns
+    int_cols = df.select_dtypes(include=['int64', 'int32', 'int16', 'int8']).columns
+    if len(int_cols) > 0:
+        original_memory_int = df[int_cols].memory_usage(deep=True).sum() / (1024**2)  # Memory in MB
+        df[int_cols] = df[int_cols].apply(pd.to_numeric, downcast='integer')
+        new_memory_int = df[int_cols].memory_usage(deep=True).sum() / (1024**2)  # Memory in MB
+        memory_saved_int = original_memory_int - new_memory_int
+        if memory_saved_int > 0:
+            print(f"Downcasted integer columns to save {memory_saved_int:.2f} MB memory")
 
+    # Downcast float columns
+    float_cols = df.select_dtypes(include=['float64', 'float32', 'float16']).columns
+    if len(float_cols) > 0:
+        original_memory_float = df[float_cols].memory_usage(deep=True).sum() / (1024**2)  # Memory in MB
+        df[float_cols] = df[float_cols].apply(pd.to_numeric, downcast='float')
+        new_memory_float = df[float_cols].memory_usage(deep=True).sum() / (1024**2)  # Memory in MB
+        memory_saved_float = original_memory_float - new_memory_float
+        if memory_saved_float > 0:
+            print(f"Downcasted float columns to save {memory_saved_float:.2f} MB memory")
 
-def convert_to_float32(df: pd.DataFrame, exclude_columns: List[str] = None) -> pd.DataFrame:
-    """
-    Convert float64 columns to float32 to reduce memory usage.
-    
-    Args:
-        df: DataFrame to convert
-        exclude_columns: List of columns to exclude from conversion (e.g., IDs)
-        
-    Returns:
-        DataFrame with float32 columns
-    """
-    if exclude_columns is None:
-        exclude_columns = []
-    
-    # Get float64 columns
-    float64_cols = df.select_dtypes(include=['float64']).columns.tolist()
-    
-    # Remove excluded columns
-    float64_cols = [col for col in float64_cols if col not in exclude_columns]
-    
-    if not float64_cols:
-        logger.info("No float64 columns to convert")
-        return df
-    
-    # Convert columns
-    logger.info(f"Converting {len(float64_cols)} float64 columns to float32...")
-    
-    # Create a copy to avoid modifying the original
-    df_converted = df.copy()
-    
-    for col in float64_cols:
-        try:
-            # Check for values that might lose precision
-            col_data = df[col].dropna()
-            if len(col_data) > 0:
-                min_val = col_data.min()
-                max_val = col_data.max()
-                
-                # Float32 range: ±3.4e38
-                if abs(min_val) > 3.4e38 or abs(max_val) > 3.4e38:
-                    logger.warning(f"Column '{col}' has values outside float32 range, skipping conversion")
-                    continue
-                
-                # Optional: precision-loss guard – ensure relative error < MAX_REL_ERROR
-                converted = col_data.astype(np.float32).astype(np.float64)
-                # Avoid division by zero by clipping denominator to 1
-                rel_err = ((col_data - converted).abs() / col_data.abs().clip(lower=1)).max()
-                if rel_err > MAX_REL_ERROR:
-                    logger.warning(
-                        f"Column '{col}' down-cast would introduce max relative error {rel_err:.2e} > {MAX_REL_ERROR:.1e}; keeping float64"
-                    )
-                    continue
-                
-            # Passed both range and precision checks → convert to float32
-            df_converted[col] = df[col].astype(np.float32)
-            
-        except Exception as e:
-            logger.warning(f"Could not convert column '{col}' to float32: {e}")
-    
-    return df_converted
+    # Convert object columns with low cardinality to category
+    for col in df.select_dtypes(include=['object']).columns:
+        # Skip columns that are known datetime columns
+        if col in datetime_cols or 'date' in col.lower() or 'time' in col.lower():
+            continue
+
+        if col in exclude_from_categorical:
+            print(f"INFO: Skipping categorical conversion for excluded column: {col}")
+            continue   
+
+        if df[col].nunique() / len(df) < 0.5:  # Low cardinality
+            original_memory = df[col].memory_usage(deep=True) / (1024**2)  # Memory in MB
+            df[col] = df[col].astype("category")
+            new_memory = df[col].memory_usage(deep=True) / (1024**2)  # Memory in MB
+            memory_saved = original_memory - new_memory
+            if memory_saved > 0:
+                print(f"Converted {col} to category to save {memory_saved:.2f} MB memory")
+
+    return df
 
 
 def get_memory_usage(df: pd.DataFrame) -> Dict[str, float]:

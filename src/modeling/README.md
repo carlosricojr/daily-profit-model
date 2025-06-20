@@ -9,11 +9,17 @@ This directory contains the production-ready machine learning system for the Dai
 ```
 src/modeling/
 ├── train_model.py              # Enhanced training system (v1 optimized)
+├── train_multi_model_ensemble.py  # Multi-target ensemble training
+├── train_with_optuna.py        # Optuna hyperparameter optimization
+├── optuna_utils.py             # Optuna utilities and study management
+├── optuna_parallel_optimization.py  # Parallel/distributed optimization
+├── optuna_visualization.py     # Optuna visualization and reporting
 ├── predict_daily.py            # Advanced prediction engine (v2 optimized)
 ├── model_manager.py            # Model lifecycle management
 ├── confidence_intervals.py     # Uncertainty quantification
 ├── model_monitoring.py         # Performance tracking and drift detection
 ├── __init__.py                 # Package initialization
+├── OPTUNA_INTEGRATION.md       # Optuna integration documentation
 └── README.md                   # This documentation
 ```
 
@@ -30,6 +36,19 @@ src/modeling/
   - Hyperparameter optimization with Optuna
   - Quantile regression for prediction intervals
 
+- **`train_multi_model_ensemble.py`** - **Multi-target ensemble training**
+  - Trains separate models for different prediction targets
+  - Ensemble scoring for hedging decisions
+  - Memory-efficient training with cleanup
+  - Support for regression and classification targets
+
+- **`train_with_optuna.py`** - **State-of-the-art hyperparameter optimization**
+  - Bayesian optimization with Tree-structured Parzen Estimator
+  - Early pruning of unpromising trials
+  - Cross-validation support
+  - Comprehensive parameter search spaces
+  - Automatic final model training with best parameters
+
 - **`predict_daily.py`** - **Advanced prediction engine** (v2 optimized)
   - Shadow deployment and real-time drift detection
   - A/B testing capabilities with traffic splitting
@@ -44,6 +63,24 @@ src/modeling/
   - Model artifact management
 
 ### Supporting Components
+
+- **`optuna_utils.py`** - **Optuna optimization utilities**
+  - Study management and persistence
+  - Custom callbacks for optimization
+  - Parameter interaction analysis
+  - Study comparison utilities
+
+- **`optuna_parallel_optimization.py`** - **Parallel hyperparameter optimization**
+  - Multi-process optimization on single machine
+  - Distributed optimization across machines
+  - Resource-aware trial execution
+  - Parallel ensemble optimization
+
+- **`optuna_visualization.py`** - **Advanced visualization and reporting**
+  - Interactive optimization dashboards
+  - Hyperparameter importance analysis
+  - Ensemble comparison reports
+  - Study convergence visualization
 
 - **`confidence_intervals.py`** - **Uncertainty quantification**
   - Quantile regression implementation
@@ -148,6 +185,30 @@ results = trainer.train_model(
 )
 ```
 
+### Hyperparameter Optimization with Optuna
+```python
+from modeling.train_with_optuna import optimize_hyperparameters, MODEL_CONFIGS
+
+# Optimize single target
+study, best_params = optimize_hyperparameters(
+    target="net_profit",
+    config=MODEL_CONFIGS["net_profit"],
+    n_trials=200,
+    use_cv=True,
+    n_jobs=4
+)
+
+# Parallel optimization for multiple targets
+from modeling.optuna_parallel_optimization import ParallelOptimizer
+
+optimizer = ParallelOptimizer(n_jobs=8)
+results = optimizer.optimize_ensemble_parallel(
+    targets=["net_profit", "gross_profit", "num_trades"],
+    n_trials_per_target=100,
+    max_workers=3
+)
+```
+
 ### Running Advanced Predictions
 ```python
 from modeling.predict_daily import AdvancedDailyPredictor
@@ -196,6 +257,15 @@ python -m modeling.train_model --tune-hyperparameters --n-trials 100
 
 # Quick training with default parameters
 python -m modeling.train_model --disable-intervals
+
+# Optuna optimization for specific targets
+python -m modeling.train_with_optuna --targets net_profit gross_profit --n-trials 200 --use-cv
+
+# Parallel optimization
+python -m modeling.optuna_parallel_optimization --mode parallel --n-trials 100 --max-workers 4
+
+# Generate optimization reports
+python -m modeling.optuna_visualization --storage-dir artefacts/optuna_studies --ensemble net_profit gross_profit
 ```
 
 ### Prediction

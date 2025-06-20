@@ -825,8 +825,8 @@ Examples:
 
     args = parser.parse_args()
 
-    # Set up logging
-    setup_logging(log_level=args.log_level, log_file="pipeline_orchestration")
+    # Set up logging with simple format (no JSON)
+    setup_logging(log_level=args.log_level, log_file="pipeline_orchestration", enable_json=False, enable_structured=False)
 
     # Derive default dates when user omits them
     if args.start_date is None:

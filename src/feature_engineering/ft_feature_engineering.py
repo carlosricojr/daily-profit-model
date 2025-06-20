@@ -1,32 +1,49 @@
 import featuretools as ft
 import pandas as pd
 import xxhash
-import joblib, pathlib
-from utils.database import execute_query_df
+import joblib
+import pathlib
 from .utils import prepare_dataframe, make_daily_id, make_hash_id
-from .dtype_utils import convert_to_float32
-
+from .dtype_utils import optimize_dtypes
 
 # ---------------------------------------------------------------------------
-# Load data (sample limited here; switch to full Dask load in production)
+# Load data from cleaned parquet files
 # ---------------------------------------------------------------------------
 
-daily_metrics_df = execute_query_df("SELECT * FROM raw_metrics_daily LIMIT 1000")
-alltime_metrics_df = execute_query_df("SELECT * FROM raw_metrics_alltime LIMIT 1000")
-hourly_metrics_df = execute_query_df("SELECT * FROM raw_metrics_hourly LIMIT 1000")
-trades_closed_df = execute_query_df("SELECT * FROM raw_trades_closed LIMIT 1000")
-trades_open_df = execute_query_df("SELECT * FROM raw_trades_open LIMIT 1000")
-plans_df = execute_query_df("SELECT * FROM raw_plans_data LIMIT 1000")
-regimes_daily_df = execute_query_df("SELECT * FROM prop_trading_model.mv_regime_daily_features LIMIT 1000")
+# Resolve paths
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
+CLEANED_DATA_DIR = PROJECT_ROOT / "artefacts" / "cleaned_data"
 
-# Convert to float32
-daily_metrics_df = convert_to_float32(daily_metrics_df)
-alltime_metrics_df = convert_to_float32(alltime_metrics_df)
-hourly_metrics_df = convert_to_float32(hourly_metrics_df)
-trades_closed_df = convert_to_float32(trades_closed_df)
-trades_open_df = convert_to_float32(trades_open_df)
-plans_df = convert_to_float32(plans_df)
-regimes_daily_df = convert_to_float32(regimes_daily_df)
+print("Loading cleaned data from parquet files...")
+
+# Load all dataframes from cleaned data directory
+daily_metrics_df = pd.read_parquet(CLEANED_DATA_DIR / "daily_metrics_df.parquet")
+alltime_metrics_df = pd.read_parquet(CLEANED_DATA_DIR / "alltime_metrics_df.parquet")
+hourly_metrics_df = pd.read_parquet(CLEANED_DATA_DIR / "hourly_metrics_df.parquet")
+trades_closed_df = pd.read_parquet(CLEANED_DATA_DIR / "trades_closed_df.parquet")
+trades_open_df = pd.read_parquet(CLEANED_DATA_DIR / "trades_open_df.parquet")
+plans_df = pd.read_parquet(CLEANED_DATA_DIR / "plans_df.parquet")
+regimes_daily_df = pd.read_parquet(CLEANED_DATA_DIR / "regimes_daily_df.parquet")
+
+print(f"Loaded data shapes:")
+print(f"  daily_metrics: {daily_metrics_df.shape}")
+print(f"  alltime_metrics: {alltime_metrics_df.shape}")
+print(f"  hourly_metrics: {hourly_metrics_df.shape}")
+print(f"  trades_closed: {trades_closed_df.shape}")
+print(f"  trades_open: {trades_open_df.shape}")
+print(f"  plans: {plans_df.shape}")
+print(f"  regimes_daily: {regimes_daily_df.shape}")
+
+# Note: When loading from parquet, pandas preserves the dtypes that were saved
+# The prepare_data.py pipeline already optimized dtypes before saving
+# We apply optimize_dtypes again here to ensure consistency and handle any edge cases
+daily_metrics_df = optimize_dtypes(daily_metrics_df)
+alltime_metrics_df = optimize_dtypes(alltime_metrics_df)
+hourly_metrics_df = optimize_dtypes(hourly_metrics_df)
+trades_closed_df = optimize_dtypes(trades_closed_df)
+trades_open_df = optimize_dtypes(trades_open_df)
+plans_df = optimize_dtypes(plans_df)
+regimes_daily_df = optimize_dtypes(regimes_daily_df)
 
 # ---------------------------------------------------------------------------
 # Key engineering
@@ -95,16 +112,6 @@ trades_open_df["trade_id"] = make_hash_id(
     trades_open_df,
     ["ticket", "login", "open_time", "platform", "trade_date"]
 )
-
-print(daily_metrics_df["daily_id"].head(3))
-print(alltime_metrics_df["account_id"].head(3))
-print(hourly_metrics_df["hourly_id"].head(3))
-print(trades_closed_df["daily_id"].head(3))
-print(trades_closed_df["trade_id"].head(3))
-print(trades_open_df["daily_id"].head(3))
-print(trades_open_df["trade_id"].head(3))
-print(plans_df["plan_id"].head(3))
-print(regimes_daily_df["regime_daily_id"].head(3))
 
 # ---------------------------------------------------------------------------
 # Build EntitySet

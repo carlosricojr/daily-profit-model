@@ -32,8 +32,8 @@ TARGET_COLUMNS = [
     "net_profit", 
     "gross_profit", 
     "gross_loss", 
-    "trades_placed",
-    "win_rate", 
+    "num_trades",
+    "success_rate", 
     "lots", 
     "risk_adj_ret", 
     "max_drawdown",
@@ -43,38 +43,42 @@ TARGET_COLUMNS = [
 
 
 def get_available_target_columns() -> List[str]:
-    """Get list of target columns that actually exist in the database."""
+    """Get list of target columns that actually exist in the cleaned data."""
     try:
-        # Use parameterized query for safety
-        placeholders = ','.join(['%s'] * len(TARGET_COLUMNS))
-        query = f"""
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name = %s 
-        AND column_name IN ({placeholders})
-        """
+        # Load a sample of the cleaned daily metrics to check available columns
+        CLEANED_DATA_DIR = PROJECT_ROOT / "artefacts" / "cleaned_data"
+        daily_metrics_path = CLEANED_DATA_DIR / "daily_metrics_df.parquet"
         
-        # Create params list with table name and column names
-        params = ['raw_metrics_daily'] + list(TARGET_COLUMNS)
+        if not daily_metrics_path.exists():
+            logger.error(f"Cleaned data file not found: {daily_metrics_path}")
+            return []
         
-        # The database module has limitations with array parameters
-        # Use a simpler, safe approach
-        query = """
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name = 'raw_metrics_daily' 
-        AND column_name IN ('net_profit', 'gross_profit', 'gross_loss', 'trades_placed',
-                            'win_rate', 'lots', 'risk_adj_ret', 'max_drawdown',
-                            'most_traded_symbol', 'mean_firm_margin')
-        """
+        # Read just the schema to get column names (efficient)
+        sample = pd.read_parquet(daily_metrics_path, columns=['account_id'])
+        all_columns = pd.read_parquet(daily_metrics_path).columns.tolist()
         
-        result = execute_query_df(query)
-        return result['column_name'].tolist()
+        # Return target columns that exist in the cleaned data
+        available = [col for col in TARGET_COLUMNS if col in all_columns]
+        logger.info(f"Found {len(available)} target columns in cleaned data")
+        return available
+        
     except Exception as e:
-        logger.warning(f"Could not query column names: {e}")
-        # Fallback: try to get columns from a sample query
-        sample = execute_query_df("SELECT * FROM raw_metrics_daily LIMIT 1")
-        return [col for col in TARGET_COLUMNS if col in sample.columns]
+        logger.warning(f"Could not load cleaned data: {e}")
+        # Fallback: try database if cleaned data not available
+        try:
+            query = """
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'raw_metrics_daily' 
+            AND column_name IN ('net_profit', 'gross_profit', 'gross_loss', 'num_trades',
+                                'success_rate', 'lots', 'risk_adj_ret', 'max_drawdown',
+                                'most_traded_symbol', 'mean_firm_margin')
+            """
+            
+            result = execute_query_df(query)
+            return result['column_name'].tolist()
+        except:
+            return []
 
 
 def add_targets_to_matrix(
@@ -102,10 +106,19 @@ def add_targets_to_matrix(
         matrix = pd.read_parquet(matrix_path)
         logger.info(f"  Matrix shape: {matrix.shape}")
         
-        # Check if targets already exist
-        if any(col.startswith("target_") for col in matrix.columns):
-            logger.info("  Targets already exist, skipping...")
-            return True
+        # Check which targets already exist and which are missing
+        existing_targets = [col for col in matrix.columns if col.startswith("target_")]
+        if existing_targets:
+            logger.info(f"  Found {len(existing_targets)} existing target columns")
+            # Check if we're missing any expected targets
+            expected_targets = [f"target_{col}" for col in available_targets]
+            missing_targets = [t for t in expected_targets if t not in existing_targets]
+            if not missing_targets:
+                logger.info("  All expected targets already exist, skipping...")
+                return True
+            else:
+                logger.info(f"  Missing targets: {missing_targets}")
+                logger.info("  Will add missing targets to existing matrix...")
         
         # Get the daily_ids from the matrix index
         if isinstance(matrix.index, pd.MultiIndex):
@@ -153,18 +166,23 @@ def add_targets_to_matrix(
             min_date = (cutoff_dates.min() + pd.Timedelta(days=1)).date()
             max_date = (cutoff_dates.max() + pd.Timedelta(days=1)).date()
             
-            # Query targets for the date range
-            cols_str = ', '.join(available_targets + ['account_id', 'date'])
-            query = f"""
-            SELECT {cols_str}
-            FROM raw_metrics_daily
-            WHERE date >= %(min_date)s AND date <= %(max_date)s
-            """
+            # Load targets from cleaned parquet file
+            CLEANED_DATA_DIR = PROJECT_ROOT / "artefacts" / "cleaned_data"
+            daily_metrics_path = CLEANED_DATA_DIR / "daily_metrics_df.parquet"
             
-            targets_df = execute_query_df(query, {
-                'min_date': min_date.strftime('%Y-%m-%d'),
-                'max_date': max_date.strftime('%Y-%m-%d')
-            })
+            logger.info(f"  Loading targets from {daily_metrics_path}")
+            
+            # Load only required columns and date range for efficiency
+            cols_to_load = available_targets + ['account_id', 'date']
+            
+            # Read the cleaned data
+            targets_df = pd.read_parquet(daily_metrics_path, columns=cols_to_load)
+            
+            # Filter to date range
+            targets_df = targets_df[
+                (targets_df['date'] >= pd.Timestamp(min_date)) & 
+                (targets_df['date'] <= pd.Timestamp(max_date))
+            ].copy()
             
             targets_df['daily_id'] = make_daily_id(targets_df['account_id'], targets_df['date'])
             
@@ -174,10 +192,19 @@ def add_targets_to_matrix(
         else:
             # For single index, same approach
             logger.warning("  Single index matrix detected, this is unexpected for feature matrices")
-            # Fall back to loading all data - this shouldn't happen in practice
-            cols_str = ', '.join(available_targets)
-            query = f"SELECT daily_id, {cols_str} FROM raw_metrics_daily"
-            targets_df = execute_query_df(query)
+            
+            # Load from cleaned data
+            CLEANED_DATA_DIR = PROJECT_ROOT / "artefacts" / "cleaned_data"
+            daily_metrics_path = CLEANED_DATA_DIR / "daily_metrics_df.parquet"
+            
+            # Load only required columns
+            cols_to_load = available_targets + ['account_id', 'date']
+            targets_df = pd.read_parquet(daily_metrics_path, columns=cols_to_load)
+            
+            # Create daily_id
+            targets_df['daily_id'] = make_daily_id(targets_df['account_id'], targets_df['date'])
+            
+            # Filter to only the daily_ids we need
             targets_df = targets_df[targets_df['daily_id'].isin(daily_ids_int)]
         
         logger.info(f"  Found {len(targets_df)} target rows")
@@ -188,17 +215,25 @@ def add_targets_to_matrix(
         # Add target columns with proper MultiIndex handling
         logger.info("  Adding target columns...")
         
+        # Determine which targets to add (only missing ones if some already exist)
+        if existing_targets:
+            targets_to_add = [col for col in available_targets if f'target_{col}' not in matrix.columns]
+            logger.info(f"  Adding only missing targets: {targets_to_add}")
+        else:
+            targets_to_add = available_targets
+            logger.info("  Adding all target columns...")
+        
         if isinstance(matrix.index, pd.MultiIndex):
             # For MultiIndex, we need to align by the first level (daily_id)
             # Create a mapping from daily_id to target values
-            for col in available_targets:
+            for col in targets_to_add:
                 if col in targets_df.columns:
                     # Map targets based on the daily_id level
                     daily_id_level = matrix.index.get_level_values(0)
                     matrix[f'target_{col}'] = daily_id_level.map(targets_df[col])
         else:
             # For single index, direct assignment works
-            for col in available_targets:
+            for col in targets_to_add:
                 if col in targets_df.columns:
                     matrix[f'target_{col}'] = targets_df[col]
         
@@ -210,6 +245,14 @@ def add_targets_to_matrix(
             # Calculate 90th percentile for highly profitable
             profit_90th = matrix['target_net_profit'].quantile(0.9)
             matrix['target_is_highly_profitable'] = (matrix['target_net_profit'] > profit_90th).astype(int)
+        
+        # Drop rows where *all* targets are NaN to avoid training-time filtering later
+        target_cols_full = [col for col in matrix.columns if col.startswith("target_") and col not in ("target_is_profitable", "target_is_highly_profitable")]
+        before_rows = len(matrix)
+        matrix = matrix.dropna(subset=target_cols_full, how="all")
+        dropped = before_rows - len(matrix)
+        if dropped:
+            logger.info(f"  Dropped {dropped:,} rows with no target values")
         
         # Save the matrix with targets
         logger.info(f"  Saving matrix with targets to {output_path}...")
@@ -248,17 +291,13 @@ def main():
     for split in ['test', 'val']:
         matrix_path = ARTEFACT_DIR / f"{split}_matrix.parquet"
         if matrix_path.exists():
-            # Check if it already has targets
-            df = pd.read_parquet(matrix_path, columns=[])
-            if not any(col.startswith('target_') for col in df.columns):
-                if not add_targets_to_matrix(matrix_path, available_targets=available_targets):
-                    logger.error(f"Failed to add targets to {split} matrix")
-                    return 1
-            else:
-                logger.info(f"{split}_matrix.parquet already has targets")
+            if not add_targets_to_matrix(matrix_path, available_targets=available_targets):
+                logger.error(f"Failed to add targets to {split} matrix")
+                return 1
     
-    # Process training chunks
+    # Process training data - either chunks or complete matrix
     chunk_files = sorted(ARTEFACT_DIR.glob("train_chunk_*_features.parquet"))
+    train_matrix_path = ARTEFACT_DIR / "train_matrix.parquet"
     
     if chunk_files:
         logger.info(f"\nFound {len(chunk_files)} training feature chunks to process")
@@ -276,8 +315,14 @@ def main():
             
         logger.info("\nAll training chunks now have targets.")
         logger.info("Use concatenate_training_chunks.py to combine them into train_matrix.parquet")
+    elif train_matrix_path.exists():
+        # Process existing train_matrix.parquet to add missing targets
+        logger.info("\nFound existing train_matrix.parquet")
+        if not add_targets_to_matrix(train_matrix_path, available_targets=available_targets):
+            logger.error("Failed to add targets to train matrix")
+            return 1
     else:
-        logger.warning("No training feature chunks found to process!")
+        logger.warning("No training feature chunks or train_matrix.parquet found to process!")
     
     logger.info("\nTarget addition process complete.")
     return 0

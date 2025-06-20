@@ -3,9 +3,8 @@ Tests for the preprocessing stage - create_staging_snapshots module.
 Ensures comprehensive coverage of all calculations and edge cases.
 """
 import pytest
-from datetime import date, datetime, timedelta
-from decimal import Decimal
-from unittest.mock import Mock, patch, MagicMock
+from datetime import date
+from unittest.mock import Mock, patch
 from preprocessing.create_staging_snapshots import StagingSnapshotsCreator
 
 
@@ -111,7 +110,7 @@ class TestStagingSnapshotsCreator:
         
         for field in ratio_fields:
             # Each ratio should be wrapped with LEAST(..., 1) and cast to numeric(5,4)
-            assert f'LEAST(COALESCE(' in sql_query or f'LEAST(GREATEST(COALESCE(' in sql_query
+            assert 'LEAST(COALESCE(' in sql_query or 'LEAST(GREATEST(COALESCE(' in sql_query
             assert f')::numeric(5,4) as {field}' in sql_query
     
     def test_platform_broker_country_included(self, creator, mock_db_manager):

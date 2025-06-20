@@ -3,10 +3,11 @@
 Orchestrate the complete feature engineering pipeline.
 
 This script coordinates:
-1. Building feature definitions (if needed)
-2. Building feature matrices (features only for training)
-3. Adding targets to all matrices
-4. Final validation of outputs
+1. Preparing and cleaning raw daily and hourly data.
+2. Building feature definitions (if needed).
+3. Building feature matrices (features only for training).
+4. Adding targets to all matrices.
+5. Final validation of outputs.
 
 Usage:
     uv run --env-file .env.local -- python -m src.feature_engineering.orchestrate_feature_engineering [--rebuild-definitions]
@@ -30,8 +31,8 @@ logger = logging.getLogger(__name__)
 # Resolve repository root (two levels up from current file: src/feature_engineering/)
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
 ARTEFACT_DIR = PROJECT_ROOT / "artefacts"
+CLEANED_DATA_DIR = ARTEFACT_DIR / "cleaned_data"
 FEATURE_DEF_PATH = ARTEFACT_DIR / "daily_feature_defs_v1.joblib"
-
 
 def run_subprocess(cmd: list, description: str, timeout_minutes: int = 60) -> bool:
     """Run a subprocess and return True if successful."""
@@ -85,7 +86,6 @@ def run_subprocess(cmd: list, description: str, timeout_minutes: int = 60) -> bo
         logger.error(f"\n✗ {description} failed with error after {elapsed:.1f} seconds: {e}")
         return False
 
-
 def check_feature_definitions() -> bool:
     """Check if feature definitions exist."""
     if FEATURE_DEF_PATH.exists():
@@ -103,12 +103,13 @@ def check_feature_definitions() -> bool:
         logger.info("Feature definitions not found")
         return False
 
-
 def validate_outputs() -> dict:
     """Validate that all expected outputs exist and have correct structure."""
     logger.info("\nValidating outputs...")
     
     results = {
+        'cleaned_daily_data': False,
+        'cleaned_hourly_data': False,
         'feature_definitions': False,
         'test_matrix': False,
         'val_matrix': False,
@@ -116,6 +117,22 @@ def validate_outputs() -> dict:
         'all_have_targets': True,
         'total_rows': 0
     }
+
+    CLEANED_DATA_DIR.mkdir(exist_ok=True)
+    daily_cleaned_path = CLEANED_DATA_DIR / "daily_metrics_df.parquet"
+    hourly_cleaned_path = CLEANED_DATA_DIR / "hourly_metrics_df.parquet"
+    
+    if daily_cleaned_path.exists():
+        logger.info(f"  daily_metrics_df.parquet: FOUND")
+        results['cleaned_daily_data'] = True
+    else:
+        logger.info(f"  daily_metrics_df.parquet: NOT FOUND")
+
+    if hourly_cleaned_path.exists():
+        logger.info(f"  hourly_metrics_df.parquet: FOUND")
+        results['cleaned_hourly_data'] = True
+    else:
+        logger.info(f"  hourly_metrics_df.parquet: NOT FOUND")
     
     # Check feature definitions
     results['feature_definitions'] = FEATURE_DEF_PATH.exists()
@@ -126,12 +143,16 @@ def validate_outputs() -> dict:
         
         if matrix_path.exists():
             try:
-                # Read just the schema
-                df = pd.read_parquet(matrix_path, columns=[])
-                n_rows = len(pd.read_parquet(matrix_path, columns=['target_net_profit']))
+                # Get schema using pyarrow to avoid loading data
+                import pyarrow.parquet as pq
+                parquet_file = pq.ParquetFile(matrix_path)
+                schema = parquet_file.schema
+                n_rows = parquet_file.metadata.num_rows
                 
-                has_features = sum(1 for col in df.columns if not col.startswith('target_'))
-                has_targets = sum(1 for col in df.columns if col.startswith('target_'))
+                # Count features and targets from schema
+                all_columns = [field.name for field in schema]
+                has_features = sum(1 for col in all_columns if not col.startswith('target_'))
+                has_targets = sum(1 for col in all_columns if col.startswith('target_'))
                 
                 logger.info(f"  {split}_matrix.parquet: {n_rows:,} rows, {has_features} features, {has_targets} targets")
                 
@@ -140,7 +161,7 @@ def validate_outputs() -> dict:
                 
                 if has_targets == 0:
                     results['all_have_targets'] = False
-                    logger.warning(f"    WARNING: No target columns found!")
+                    logger.warning("    WARNING: No target columns found!")
                 
             except Exception as e:
                 logger.error(f"  {split}_matrix.parquet: ERROR - {e}")
@@ -154,8 +175,6 @@ def validate_outputs() -> dict:
     
     return results
 
-
-
 def main():
     """Main orchestration function."""
     parser = argparse.ArgumentParser(description="Orchestrate feature engineering pipeline")
@@ -164,6 +183,14 @@ def main():
         action="store_true",
         help="Force rebuild of feature definitions even if they exist"
     )
+
+    parser.add_argument(
+        "--data-prep-type",
+        choices=['all', 'daily', 'hourly'],
+        default='all',
+        help="Specify which raw metrics to prepare (daily, hourly, or all)."
+    )
+
     parser.add_argument(
         "--skip-cleanup",
         action="store_true",
@@ -177,44 +204,62 @@ def main():
     
     # Ensure artefacts directory exists
     ARTEFACT_DIR.mkdir(exist_ok=True)
+
+    # Step 1: Prepare and clean raw data
+    data_prep_cmd = [
+        "uv", "run", "--env-file", ".env.local", "--", "python", "-m",
+        "src.feature_engineering.prepare_data_streaming"
+    ]
+    # Add the flag if a specific type is requested
+    if args.data_prep_type != 'all':
+        data_prep_cmd.extend(["--metrics-type", args.data_prep_type])
+
+    success = run_subprocess(
+        data_prep_cmd,
+        "Step 1: Preparing and cleaning raw data",
+        timeout_minutes=120  # Give this step a generous timeout
+    )
+    if not success:
+        logger.error("Failed to prepare data. Halting pipeline.")
+        sys.exit(1)
     
-    # Step 1: Build feature definitions if needed
+    # Step 2: Build feature definitions if needed
     if args.rebuild_definitions or not check_feature_definitions():
         success = run_subprocess(
             ["uv", "run", "--env-file", ".env.local", "--", "python", "-m", 
              "src.feature_engineering.ft_feature_engineering"],
-            "Building feature definitions"
+            "Step 2: Building feature definitions"
         )
         
         if not success:
             logger.error("Failed to build feature definitions")
             sys.exit(1)
     else:
-        logger.info("Using existing feature definitions")
+        logger.info("Using existing feature definitions for Step 2.")
     
-    # Step 2: Build feature matrices
+    # Step 3: Build feature matrices
     success = run_subprocess(
         ["uv", "run", "--env-file", ".env.local", "--", "python", "-m",
          "src.feature_engineering.ft_build_feature_matrix"],
-        "Building feature matrices"
+        "Step 3: Building feature matrices"
     )
     
     if not success:
         logger.error("Failed to build feature matrices")
         sys.exit(1)
     
-    # Step 3: Add targets to feature matrices
+    # Step 4: Add targets to feature matrices
     success = run_subprocess(
         ["uv", "run", "--env-file", ".env.local", "--", "python", "-m",
          "src.feature_engineering.add_targets_to_features"],
-        "Adding targets to feature matrices"
+        "Step 4: Adding targets to feature matrices"
     )
     
     if not success:
         logger.error("Failed to add targets to feature matrices")
         sys.exit(1)
     
-    # Step 4: Concatenate training chunks into final train_matrix.parquet
+    # Step 5: Concatenate training chunks into final train_matrix.parquet
     # Check if we have chunks to concatenate
     chunk_files = list(ARTEFACT_DIR.glob("train_chunk_*.parquet"))
     chunk_files = [f for f in chunk_files if not f.name.endswith('_features.parquet')]
@@ -224,8 +269,8 @@ def main():
         
         success = run_subprocess(
             ["uv", "run", "--env-file", ".env.local", "--", "python", "-m",
-             "src.feature_engineering.concatenate_training_chunks"],
-            "Concatenating training chunks",
+             "src.feature_engineering.concatenate_training_chunks", "--force"],
+            "Step 5: Concatenating training chunks",
             timeout_minutes=30
         )
         
@@ -233,12 +278,12 @@ def main():
             logger.error("Failed to concatenate training chunks")
             sys.exit(1)
     else:
-        logger.info("No training chunks found - skipping concatenation")
+        logger.info("No training chunks found - skipping Step 5: Concatenation")
     
-    # Step 5: Validate outputs
+    # Step 6: Validate outputs
     validation_results = validate_outputs()
     
-    # Step 6: Cleanup (optional) - now handled by concatenate_training_chunks
+    # Step 7: Cleanup (optional) - now handled by concatenate_training_chunks
     # We'll just remove any error files or other temporary files
     if not args.skip_cleanup:
         logger.info("\nCleaning up any error files...")
@@ -260,6 +305,8 @@ def main():
     logger.info("="*60)
     
     all_good = all([
+        validation_results['cleaned_daily_data'],
+        validation_results['cleaned_hourly_data'],
         validation_results['feature_definitions'],
         validation_results['test_matrix'],
         validation_results['val_matrix'],
